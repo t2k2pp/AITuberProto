@@ -1753,37 +1753,6 @@ YouTubeライブ配信での短時間の応答に適した内容にしてくだ�
 
 # キャラクター編集ダイアログ（6エンジン完全対応版）
 class CharacterEditDialog:
-
-        personality = char_data.get("personality", {})
-        response_settings = char_data.get("response_settings", {})
-        voice_settings = char_data.get("voice_settings", {})
-
-        prompt = f"""
-あなたは「{char_data.get('name', '')}」という名前のAITuberです。
-
-性格と話し方：
-- 基本的な口調: {personality.get('base_tone', '')}
-- 話し方のスタイル: {personality.get('speech_style', '')}
-- キャラクターの特徴: {', '.join(personality.get('character_traits', []))}
-- 好きな話題: {', '.join(personality.get('favorite_topics', []))}
-
-返答のルール：
-- 文章の長さ: {response_settings.get('max_length', '1-2文程度')}
-- 絵文字の使用: {'積極的に使用' if response_settings.get('use_emojis', True) else '控えめに使用'}
-- 感情表現: {response_settings.get('emotion_level', '普通')}レベル
-
-技術情報：
-- 音声エンジン: {voice_settings.get('engine', 'google_ai_studio_new')}
-- 音声モデル: {voice_settings.get('model', 'Alloy')}
-
-視聴者との自然で親しみやすい会話を心がけてください。
-YouTubeライブ配信での短時間の応答に適した内容にしてください。
-あなたのキャラクター性を活かした魅力的な応答をしてください。
-        """
-        return prompt.strip()
-
-# キャラクター編集ダイアログ（6エンジン完全対応版）
-class CharacterEditDialog:
     """キャラクター作成・編集ダイアログ v2.2（6エンジン完全対応・機能削減なし）"""
     
     def __init__(self, parent, character_manager, char_id=None, char_data=None):
