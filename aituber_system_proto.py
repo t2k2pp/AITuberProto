@@ -175,23 +175,30 @@ class GoogleAIStudioNewVoiceAPI(VoiceEngineBase):
     """
     
     def __init__(self):
-        self.max_length = 2000 #  一般的なTTSの上限として維持、SDKでは具体的に言及なし
-        self.voice_models = [ # ドキュメントに記載されているTTSサポートボイス
-            "gemini-2.5-flash-preview-tts-alloy",
-            "gemini-2.5-flash-preview-tts-echo",
-            "gemini-2.5-flash-preview-tts-fable",
-            "gemini-2.5-flash-preview-tts-onyx",
-            "gemini-2.5-flash-preview-tts-nova",
-            "gemini-2.5-flash-preview-tts-shimmer"
+        self.max_length = 2000 # 一般的なTTSの上限として維持、SDKでは具体的に言及なし
+        # Google AI Studio TTS (gemini-2.5-flash-preview-tts) で利用可能な音声名。
+        # これらはSDKの `PrebuiltVoiceConfig` の `voice_name` パラメータで使用する。
+        # 参考: https://ai.google.dev/gemini-api/docs/speech-generation#voice_options
+        # ドキュメント記載の30種類に加え、既存のUIやテンプレートで使われていた可能性のある名前も追加。
+        official_voice_names = [
+            "Zephyr", "Puck", "Charon", "Kore", "Fenrir", "Leda", "Orus", "Aoede",
+            "Callirrhoe", "Autonoe", "Enceladus", "Iapetus", "Umbriel", "Algieba",
+            "Despina", "Erinome", "Algenib", "Rasalgethi", "Laomedeia", "Achernar",
+            "Alnilam", "Schedar", "Gacrux", "Pulcherrima", "Achird", "Zubenelgenubi",
+            "Vindemiatrix", "Sadachbia", "Sadaltager", "Sulafat"
         ]
+        # 以前のコードやUIのデフォルト値で使われていた可能性のある名前 (大文字化して統一)
+        legacy_short_names = ["Alloy", "Echo", "Fable", "Onyx", "Nova", "Shimmer"]
+
+        self.voice_models = list(dict.fromkeys(official_voice_names + legacy_short_names)) # 重複を除いて結合
+
         # self.api_endpoint = "https://generativelanguage.googleapis.com/v1beta" # SDK利用のため不要
     
     def get_available_voices(self):
-        # モデル名が長いため、UI表示用に短縮名を返すことも検討できますが、
-        # ここではSDKで直接使用する正式なモデル名を返します。
-        # UI側で表示名を工夫する必要があるかもしれません。
-        # もしくは、 CharacterEditDialog の voice_models のリストをこちらに合わせる。
-        # 今回は、このクラスの責務として正しいモデル名を返すことに注力します。
+        """
+        利用可能な音声モデル名（短い形式、例: "Kore", "Alloy"）のリストを返す。
+        これはUIのドロップダウンに表示され、SDK呼び出し時の `voice_name` として使用される。
+        """
         return self.voice_models
     
     def get_max_text_length(self):
@@ -207,65 +214,74 @@ class GoogleAIStudioNewVoiceAPI(VoiceEngineBase):
     
     async def synthesize_speech(self, text, voice_model="gemini-2.5-flash-preview-tts-alloy", speed=1.0, api_key=None, **kwargs):
         """
-        Google AI Studio 新音声合成 (SDK版)
-        モデル名: gemini-2.5-flash-preview-tts
-        ボイス: gemini-2.5-flash-preview-tts-<VOICE_NAME> (例: gemini-2.5-flash-preview-tts-alloy)
+        Google AI Studio 新音声合成 (SDK版 v202506)
+        使用モデル: gemini-2.5-flash-preview-tts (または gemini-2.5-pro-preview-tts)
+        音声指定: `PrebuiltVoiceConfig` の `voice_name` に短い音声名 (例: "Kore", "Alloy") を指定。
+        API呼び出し: `client.models.generate_content` を使用。
+        ドキュメント: https://ai.google.dev/gemini-api/docs/speech-generation
         """
         try:
-            if not api_key:
-                # print("🐍 GoogleAIStudioNewVoiceAPI: synthesize_speech - APIキーが引数で渡されませんでした。genai.configure() での設定を期待します。")
-                # genai.configure() が事前に呼び出されていることを期待する
-                pass
+            # APIキーの取り扱い:
+            # - 引数 `api_key` が指定されていれば、それを使用して genai.Client を初期化。
+            # - 指定されていなければ、事前に `genai.configure(api_key=...)` が呼び出されているか、
+            #   環境変数 `GOOGLE_API_KEY` が設定されていることを期待して `genai.Client()` を使用。
+            if api_key:
+                client = genai.Client(api_key=api_key)
             else:
-                # print(f"🔑 GoogleAIStudioNewVoiceAPI: synthesize_speech - APIキーを引数で受け取りました。genai.configure()を呼び出します。")
-                genai.configure(api_key=api_key)
+                client = genai.Client()
 
-            # モデルの初期化 (TTSモデル)
-            # ドキュメントではモデル名は "gemini-2.5-flash-preview-tts" となっているが、
-            # ボイス指定は "gemini-2.5-flash-preview-tts-<VOICE_NAME>" の形式。
-            # generate_speech の model パラメータにボイス名そのものを渡す。
-            # ボイスモデル名は get_available_voices() で取得したものを使用する想定。
-            # speed はSDKの generate_speech では直接サポートされていないため、ここでは使用しない。
-            # 必要であればSSMLなど他の方法を検討する必要がある。
-
+            # `voice_model` には "Kore", "Alloy" のような短い音声名が渡されることを期待。
+            # `speed` パラメータは現状のSDKでは直接サポートされていない。
+            # プロンプトによるスタイル制御 (例: "Speak slowly: ...") は可能だが、ここでは実装しない。
             print(f"ℹ️ GoogleAIStudioNewVoiceAPI: synthesize_speech - Text: {text[:50]}...")
-            print(f"ℹ️ GoogleAIStudioNewVoiceAPI: synthesize_speech - Voice Model (actually voice name for SDK): {voice_model}")
+            print(f"ℹ️ GoogleAIStudioNewVoiceAPI: synthesize_speech - Voice Name for SDK: {voice_model}")
 
-            # SDKを使用して音声合成
-            # generate_speechメソッドは text と voice を引数に取る
-            # model引数は generate_speech メソッドの model パラメータではなく、
-            # genai.GenerativeModel の初期化時に指定するモデル名となる。
-            # しかし、TTSのドキュメントでは generate_speech の引数として text と voice のみが記載。
-            # ここでの voice_model はSDKの `voice` パラメータに対応する。
+            tts_model_name = "gemini-2.5-flash-preview-tts" # TTS専用モデル
 
-            # 正しいTTSモデル名を指定
-            tts_model_name = "gemini-2.5-flash-preview-tts"
-            model = genai.GenerativeModel(tts_model_name)
-
-            response = await asyncio.to_thread(
-                model.generate_speech,
-                text,
-                voice=voice_model # 例: "gemini-2.5-flash-preview-tts-alloy"
-                # speedのようなパラメータは generate_speech には直接ない
+            # 音声合成のための設定オブジェクトを作成
+            generation_config = types.GenerateContentConfig(
+                response_modalities=["AUDIO"],
+                speech_config=types.SpeechConfig(
+                    voice_config=types.VoiceConfig(
+                        prebuilt_voice_config=types.PrebuiltVoiceConfig(
+                            voice_name=voice_model # 例: "Kore", "Alloy"
+                        )
+                    )
+                ),
             )
 
-            if response and response.audio_data:
-                audio_data = response.audio_data
+            # `client.models.generate_content` はブロッキング呼び出しのため、非同期コンテキストで実行するために `asyncio.to_thread` を使用。
+            response = await asyncio.to_thread(
+                client.models.generate_content, # `GenerativeModel` インスタンスではなく `Client().models` から呼び出す
+                model=tts_model_name,           # TTS専用モデル名 (例: "gemini-2.5-flash-preview-tts")
+                contents=text,                  # 合成するテキスト
+                generation_config=generation_config # 上記で作成した音声合成用設定
+            )
 
-                # 一時ファイルに保存 (MP3形式で返ってくる想定)
-                # ドキュメントには出力形式の指定方法の記載がないが、一般的にMP3が多い
-                temp_file = tempfile.NamedTemporaryFile(delete=False, suffix=".mp3")
-                temp_file.write(audio_data)
-                temp_file.close()
+            # レスポンスから音声データを抽出
+            if response and response.candidates and response.candidates[0].content and response.candidates[0].content.parts:
+                audio_part = response.candidates[0].content.parts[0]
+                if audio_part.inline_data and audio_part.inline_data.data:
+                    audio_data = audio_part.inline_data.data
 
-                print(f"✅ Google AI Studio新音声合成成功 (SDK): {voice_model}, File: {temp_file.name}")
-                return [temp_file.name]
+                    # 音声データを一時ファイルに保存。
+                    # ドキュメントの例では .wav 形式で保存しているため、それに倣う。
+                    # (SDKが出力する実際の形式はドキュメントに明記されていないが、通常MP3またはWAV)
+                    temp_file = tempfile.NamedTemporaryFile(delete=False, suffix=".wav")
+                    temp_file.write(audio_data)
+                    temp_file.close()
+
+                    print(f"✅ Google AI Studio新音声合成成功 (SDK): Voice: {voice_model}, File: {temp_file.name}")
+                    return [temp_file.name]
+                else:
+                    print(f"❌ Google AI Studio新音声 (SDK): レスポンスに音声データ (inline_data.data) が含まれていません。Audio Part: {audio_part}")
+                    return []
             else:
-                print(f"❌ Google AI Studio新音声 (SDK): 音声データの取得に失敗。Response: {response}")
+                print(f"❌ Google AI Studio新音声 (SDK): APIから期待される形式のレスポンスが得られませんでした。Response: {response}")
                 return []
 
         except Exception as e:
-            print(f"❌ Google AI Studio新音声エラー (SDK): {e}")
+            print(f"❌ Google AI Studio新音声エラー (SDK Main): {e}")
             import traceback
             print(f"詳細トレース: {traceback.format_exc()}")
             # SDK利用時は、SDKが内部でリトライやフォールバックを処理する可能性があるため、
@@ -1808,9 +1824,40 @@ class CharacterEditDialog:
         
         # update_voice_models は既に上で呼び出されているので、ここでは不要
         # self.update_voice_models()
+
+        # 追加対応：Google AI Studio 新音声エンジンの場合、古い形式のモデル名 (例: "gemini-2.5-flash-preview-tts-alloy") が
+        # 設定ファイル等から読み込まれた場合に、新しい短い形式 (例: "Alloy") に変換してUIに正しく反映させる。
+        selected_engine = voice_settings.get('engine', 'google_ai_studio_new') # 現在選択されている、または読み込まれたエンジン
+        if selected_engine == "google_ai_studio_new":
+            # self.voice_var には、update_voice_models() の後に、保存されていたモデル名が設定されているはず。
+            # (または、保存されたモデル名がリストにない場合はリストの最初の要素)
+            current_model_selection_from_config = voice_settings.get('model') # 設定ファイル等に保存されていたモデル名
+
+            if current_model_selection_from_config and \
+               current_model_selection_from_config.startswith("gemini-2.5-flash-preview-tts-"):
+                try:
+                    # 例: "gemini-2.5-flash-preview-tts-alloy" -> "Alloy"
+                    short_model_name = current_model_selection_from_config.split('-')[-1].capitalize()
+
+                    # 変換した短い名前が、更新された音声リスト (self.voice_combo['values']) に存在するか確認
+                    if short_model_name in self.voice_combo['values']:
+                        self.voice_var.set(short_model_name) # UIの選択値を更新
+                    else:
+                        # 変換後の名前がリストにない場合 (例: SDKの音声リストから削除された等) は、
+                        # 現在のリストの最初の音声を選択する。
+                        if self.voice_combo['values']:
+                            self.voice_var.set(self.voice_combo['values'][0])
+                        # else: リストが空の場合は何もしない（エラーケース）
+                except IndexError:
+                    # 文字列操作で予期せぬエラーが発生した場合のフォールバック
+                    if self.voice_combo['values']:
+                        self.voice_var.set(self.voice_combo['values'][0])
+            # else: 保存されていたモデル名が短い形式であるか、または他のエンジンである場合は、
+            #       既に update_voice_models と voice_settings.get('model', ...) の組み合わせで
+            #       適切な値が self.voice_var に設定されているはずなので、ここでは何もしない。
     
     def on_engine_changed(self, event=None):
-        """音声エンジン変更時の処理"""
+        """音声エンジン選択が変更された際の処理。音声モデルのリストを更新する。"""
         self.update_voice_models()
     
     def update_voice_models(self):
