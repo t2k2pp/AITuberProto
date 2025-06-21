@@ -2071,8 +2071,9 @@ class CharacterEditDialog:
                 
                 # エンジンに応じて処理（完全対応版）
                 if voice_engine == "google_ai_studio_new":
-                    api_key = self._get_api_key("google_ai_api_key")
+                    api_key = self._get_api_key("google_ai_api_key") # この行は既に存在
                     engine = GoogleAIStudioNewVoiceAPI()
+                    # synthesize_speech に api_key を渡す
                     audio_files = loop.run_until_complete(
                         engine.synthesize_speech(text, voice_model, speed, api_key=api_key)
                     )
@@ -2145,8 +2146,9 @@ class CharacterEditDialog:
                     
                     try:
                         if engine_name == "google_ai_studio_new":
-                            api_key = self._get_api_key("google_ai_api_key")
+                            api_key = self._get_api_key("google_ai_api_key") # 修正: この行は既に存在し、正しい
                             engine = GoogleAIStudioNewVoiceAPI()
+                            # 修正: synthesize_speech に api_key を渡す (既に正しく渡されている)
                             audio_files = loop.run_until_complete(
                                 engine.synthesize_speech(test_text, voice_model, 1.0, api_key=api_key)
                             )
@@ -3287,11 +3289,18 @@ class AITuberMainGUI:
             # API KEY取得
             google_ai_api_key = self.config.get_system_setting("google_ai_api_key")
             google_cloud_api_key = self.config.get_system_setting("google_cloud_api_key")
+
+            # 優先エンジンに応じて適切なAPIキーを選択
+            api_key_to_use = None
+            if "google_ai_studio" in voice_engine:
+                api_key_to_use = google_ai_api_key
+            elif voice_engine == "google_cloud_tts":
+                api_key_to_use = google_cloud_api_key
             
             # フォールバック機能付き音声合成
             audio_files = loop.run_until_complete(
                 self.voice_manager.synthesize_with_fallback(
-                    text, voice_model, speed, preferred_engine=voice_engine, api_key=google_cloud_api_key
+                    text, voice_model, speed, preferred_engine=voice_engine, api_key=api_key_to_use
                 )
             )
             
@@ -3346,9 +3355,15 @@ class AITuberMainGUI:
                     voices = engine.get_available_voices()
                     default_voice = voices[0] if voices else "default"
                     
-                    if engine_name == "google_cloud_tts":
+                    api_key_to_use = None
+                    if "google_ai_studio" in engine_name: # google_ai_studio_new と google_ai_studio_legacy
+                        api_key_to_use = self.config.get_system_setting("google_ai_api_key")
+                    elif engine_name == "google_cloud_tts":
+                        api_key_to_use = google_cloud_api_key # これはループ外で取得済み
+
+                    if api_key_to_use:
                         audio_files = loop.run_until_complete(
-                            engine.synthesize_speech(test_text, default_voice, 1.0, api_key=google_cloud_api_key)
+                            engine.synthesize_speech(test_text, default_voice, 1.0, api_key=api_key_to_use)
                         )
                     else:
                         audio_files = loop.run_until_complete(
@@ -3510,12 +3525,20 @@ class AITuberMainGUI:
             asyncio.set_event_loop(loop)
             
             # API KEY取得（音声合成用）
+            google_ai_api_key = self.config.get_system_setting("google_ai_api_key")
             google_cloud_api_key = self.config.get_system_setting("google_cloud_api_key")
+
+            # 優先エンジンに応じて適切なAPIキーを選択
+            api_key_to_use = None
+            if "google_ai_studio" in voice_engine: # google_ai_studio_new または google_ai_studio_legacy
+                api_key_to_use = google_ai_api_key
+            elif voice_engine == "google_cloud_tts":
+                api_key_to_use = google_cloud_api_key
             
             # フォールバック機能付き音声合成
             audio_files = loop.run_until_complete(
                 self.voice_manager.synthesize_with_fallback(
-                    ai_response, voice_model, speed, preferred_engine=voice_engine, api_key=google_cloud_api_key
+                    ai_response, voice_model, speed, preferred_engine=voice_engine, api_key=api_key_to_use
                 )
             )
             
