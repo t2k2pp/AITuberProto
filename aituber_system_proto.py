@@ -21,8 +21,9 @@ Google AI Studio新音声合成（2025年5月追加）+ Google Cloud TTS + Avis 
 
 import tkinter as tk
 from tkinter import ttk, messagebox, filedialog, simpledialog
-import google.generativeai as genai
-from google.genai import types
+from google import genai
+from google.generativeai import types
+#import google.generativeai as genai
 import requests
 import asyncio
 import json
@@ -33,12 +34,12 @@ import logging
 import uuid
 import webbrowser
 import tempfile
-import subprocess
+#import subprocess
 import platform
 from datetime import datetime
 from pathlib import Path
 import aiohttp
-import urllib.parse
+#import urllib.parse
 import base64
 
 # 設定管理クラス（完全版）
@@ -230,6 +231,11 @@ class GoogleAIStudioNewVoiceAPI(VoiceEngineBase):
             else:
                 client = genai.Client()
 
+
+
+    #response = model.generate_content('Teach me about how an LLM works')
+
+
             # `voice_model` には "Kore", "Alloy" のような短い音声名が渡されることを期待。
             # `speed` パラメータは現状のSDKでは直接サポートされていない。
             # プロンプトによるスタイル制御 (例: "Speak slowly: ...") は可能だが、ここでは実装しない。
@@ -239,11 +245,11 @@ class GoogleAIStudioNewVoiceAPI(VoiceEngineBase):
             tts_model_name = "gemini-2.5-flash-preview-tts" # TTS専用モデル
 
             # 音声合成のための設定オブジェクトを作成
-            generation_config = types.GenerateContentConfig(
+            generation_config = genai.types.GenerateContentConfig(
                 response_modalities=["AUDIO"],
-                speech_config=types.SpeechConfig(
-                    voice_config=types.VoiceConfig(
-                        prebuilt_voice_config=types.PrebuiltVoiceConfig(
+                speech_config=genai.types.SpeechConfig(
+                    voice_config=genai.types.VoiceConfig(
+                        prebuilt_voice_config=genai.types.PrebuiltVoiceConfig(
                             voice_name=voice_model # 例: "Kore", "Alloy"
                         )
                     )
