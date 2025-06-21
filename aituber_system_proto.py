@@ -22,6 +22,7 @@ Google AI Studio新音声合成（2025年5月追加）+ Google Cloud TTS + Avis 
 import tkinter as tk
 from tkinter import ttk, messagebox, filedialog, simpledialog
 import google.generativeai as genai
+from google.genai import types
 import requests
 import asyncio
 import json
@@ -174,20 +175,23 @@ class GoogleAIStudioNewVoiceAPI(VoiceEngineBase):
     """
     
     def __init__(self):
-        self.max_length = 2000
-        self.voice_models = [
-            # 2025年5月新追加音声（完全版）
-            "Alloy", "Echo", "Fable", "Onyx", "Nova", "Shimmer",
-            # 日本語対応新音声（完全版）
-            "Kibo", "Yuki", "Hana", "Taro", "Sakura", "Ryo",
-            # 多言語対応（完全版）
-            "Aurora", "Breeze", "Cosmic", "Dawn", "Ember", "Flow",
-            # 感情表現対応（完全版）
-            "Calm", "Excited", "Gentle", "Serious", "Cheerful", "Mystic"
+        self.max_length = 2000 #  一般的なTTSの上限として維持、SDKでは具体的に言及なし
+        self.voice_models = [ # ドキュメントに記載されているTTSサポートボイス
+            "gemini-2.5-flash-preview-tts-alloy",
+            "gemini-2.5-flash-preview-tts-echo",
+            "gemini-2.5-flash-preview-tts-fable",
+            "gemini-2.5-flash-preview-tts-onyx",
+            "gemini-2.5-flash-preview-tts-nova",
+            "gemini-2.5-flash-preview-tts-shimmer"
         ]
-        self.api_endpoint = "https://generativelanguage.googleapis.com/v1beta"
+        # self.api_endpoint = "https://generativelanguage.googleapis.com/v1beta" # SDK利用のため不要
     
     def get_available_voices(self):
+        # モデル名が長いため、UI表示用に短縮名を返すことも検討できますが、
+        # ここではSDKで直接使用する正式なモデル名を返します。
+        # UI側で表示名を工夫する必要があるかもしれません。
+        # もしくは、 CharacterEditDialog の voice_models のリストをこちらに合わせる。
+        # 今回は、このクラスの責務として正しいモデル名を返すことに注力します。
         return self.voice_models
     
     def get_max_text_length(self):
@@ -201,251 +205,72 @@ class GoogleAIStudioNewVoiceAPI(VoiceEngineBase):
             "description": "2025年5月新追加・最新技術・リアルタイム対応・感情表現"
         }
     
-    async def synthesize_speech(self, text, voice_model="Alloy", speed=1.0, api_key=None, **kwargs):
+    async def synthesize_speech(self, text, voice_model="gemini-2.5-flash-preview-tts-alloy", speed=1.0, api_key=None, **kwargs):
         """
-        Google AI Studio新音声合成を使用した音声合成（2025年5月版・完全実装）
+        Google AI Studio 新音声合成 (SDK版)
+        モデル名: gemini-2.5-flash-preview-tts
+        ボイス: gemini-2.5-flash-preview-tts-<VOICE_NAME> (例: gemini-2.5-flash-preview-tts-alloy)
         """
         try:
             if not api_key:
-                print("🐍 GoogleAIStudioNewVoiceAPI: synthesize_speech - APIキーが引数で渡されませんでした。環境変数を確認します。")
-                api_key = os.getenv('GOOGLE_AI_API_KEY')
-            
-            if not api_key:
-                print("❌ GoogleAIStudioNewVoiceAPI: synthesize_speech - Google AI Studio APIキーが設定されていません")
+                # print("🐍 GoogleAIStudioNewVoiceAPI: synthesize_speech - APIキーが引数で渡されませんでした。genai.configure() での設定を期待します。")
+                # genai.configure() が事前に呼び出されていることを期待する
+                pass
+            else:
+                # print(f"🔑 GoogleAIStudioNewVoiceAPI: synthesize_speech - APIキーを引数で受け取りました。genai.configure()を呼び出します。")
+                genai.configure(api_key=api_key)
+
+            # モデルの初期化 (TTSモデル)
+            # ドキュメントではモデル名は "gemini-2.5-flash-preview-tts" となっているが、
+            # ボイス指定は "gemini-2.5-flash-preview-tts-<VOICE_NAME>" の形式。
+            # generate_speech の model パラメータにボイス名そのものを渡す。
+            # ボイスモデル名は get_available_voices() で取得したものを使用する想定。
+            # speed はSDKの generate_speech では直接サポートされていないため、ここでは使用しない。
+            # 必要であればSSMLなど他の方法を検討する必要がある。
+
+            print(f"ℹ️ GoogleAIStudioNewVoiceAPI: synthesize_speech - Text: {text[:50]}...")
+            print(f"ℹ️ GoogleAIStudioNewVoiceAPI: synthesize_speech - Voice Model (actually voice name for SDK): {voice_model}")
+
+            # SDKを使用して音声合成
+            # generate_speechメソッドは text と voice を引数に取る
+            # model引数は generate_speech メソッドの model パラメータではなく、
+            # genai.GenerativeModel の初期化時に指定するモデル名となる。
+            # しかし、TTSのドキュメントでは generate_speech の引数として text と voice のみが記載。
+            # ここでの voice_model はSDKの `voice` パラメータに対応する。
+
+            # 正しいTTSモデル名を指定
+            tts_model_name = "gemini-2.5-flash-preview-tts"
+            model = genai.GenerativeModel(tts_model_name)
+
+            response = await asyncio.to_thread(
+                model.generate_speech,
+                text,
+                voice=voice_model # 例: "gemini-2.5-flash-preview-tts-alloy"
+                # speedのようなパラメータは generate_speech には直接ない
+            )
+
+            if response and response.audio_data:
+                audio_data = response.audio_data
+
+                # 一時ファイルに保存 (MP3形式で返ってくる想定)
+                # ドキュメントには出力形式の指定方法の記載がないが、一般的にMP3が多い
+                temp_file = tempfile.NamedTemporaryFile(delete=False, suffix=".mp3")
+                temp_file.write(audio_data)
+                temp_file.close()
+
+                print(f"✅ Google AI Studio新音声合成成功 (SDK): {voice_model}, File: {temp_file.name}")
+                return [temp_file.name]
+            else:
+                print(f"❌ Google AI Studio新音声 (SDK): 音声データの取得に失敗。Response: {response}")
                 return []
-            print(f"🔑 GoogleAIStudioNewVoiceAPI: synthesize_speech - 使用するAPIキーの最初の5文字: {api_key[:5]}...")
-
-            # 新音声合成API設定（2025年5月版・完全実装）
-            # 401エラーのログから、このエンドポイントはOAuth2トークンを期待している可能性がある。
-            # APIキーのみを使用する場合、'x-goog-api-key' のみが適切か、あるいは別の認証方法が必要。
-            # まずは 'Authorization: Bearer' を削除し、'x-goog-api-key' のみで試す。
-            headers = {
-                # "Authorization": f"Bearer {api_key}", # 401エラーの原因の可能性があるためコメントアウト
-                "Content-Type": "application/json",
-                "x-goog-api-key": api_key
-            }
-            print(f"⚠️ GoogleAIStudioNewVoiceAPI: synthesize_speech - Authorization: Bearer ヘッダーを削除し、x-goog-api-key のみで試行します。")
-            
-            # 新APIリクエスト構造（完全版）
-            request_body = {
-                "model": "gemini-2.5-flash",
-                "generation_config": {
-                    "response_modalities": ["AUDIO"],
-                    "speech_config": {
-                        "voice_config": {
-                            "prebuilt_voice_config": {
-                                "voice_name": voice_model
-                            }
-                        },
-                        "speaking_rate": speed,
-                        "pitch": 0.0,
-                        "volume_gain_db": 0.0,
-                        "effects_profile_id": ["small-bluetooth-speaker-class-device"]
-                    }
-                },
-                "contents": [{
-                    "parts": [{
-                        "text": f"Please speak this text naturally and expressively: {text}"
-                    }]
-                }]
-            }
-            
-            async with aiohttp.ClientSession() as session:
-                async with session.post(
-                    f"{self.api_endpoint}/models/gemini-2.5-flash:generateContent",
-                    headers=headers,
-                    json=request_body,
-                    timeout=30
-                ) as response:
-                    response_status = response.status
-                    response_text = await response.text()
-                    print(f"ℹ️ GoogleAIStudioNewVoiceAPI: synthesize_speech - API URL: {response.url}")
-                    print(f"ℹ️ GoogleAIStudioNewVoiceAPI: synthesize_speech - Request Headers: {headers}")
-                    print(f"ℹ️ GoogleAIStudioNewVoiceAPI: synthesize_speech - Request Body: {json.dumps(request_body, indent=2)}")
-                    print(f"ℹ️ GoogleAIStudioNewVoiceAPI: synthesize_speech - Response Status: {response_status}")
-                    print(f"ℹ️ GoogleAIStudioNewVoiceAPI: synthesize_speech - Response Headers: {response.headers}")
-                    print(f"ℹ️ GoogleAIStudioNewVoiceAPI: synthesize_speech - Response Body: {response_text[:500]}...") # Log first 500 chars
-
-                    if response_status != 200:
-                        print(f"⚠️ GoogleAIStudioNewVoiceAPI: synthesize_speech - APIリクエスト失敗、フォールバックを試みます。Status: {response_status}")
-                        return await self._fallback_new_voice_api(text, voice_model, speed, api_key, primary_error_details=response_text)
-                    
-                    try:
-                        response_data = json.loads(response_text)
-                    except json.JSONDecodeError as json_err:
-                        print(f"❌ GoogleAIStudioNewVoiceAPI: synthesize_speech - JSONデコードエラー: {json_err}")
-                        print(f"❌ GoogleAIStudioNewVoiceAPI: synthesize_speech - 非JSONレスポンス: {response_text[:500]}...")
-                        return await self._fallback_new_voice_api(text, voice_model, speed, api_key, primary_error_details="JSON decode error")
-
-                    # 音声データ抽出（完全版）
-                    if 'candidates' in response_data and response_data['candidates']:
-                        candidate = response_data['candidates'][0]
-                        if 'content' in candidate and 'parts' in candidate['content']:
-                            for part in candidate['content']['parts']:
-                                if 'inline_data' in part:
-                                    # 音声データをデコード
-                                    audio_data = base64.b64decode(part['inline_data']['data'])
-                                    
-                                    # 一時ファイルに保存
-                                    temp_file = tempfile.NamedTemporaryFile(delete=False, suffix=".wav")
-                                    temp_file.write(audio_data)
-                                    temp_file.close()
-                                    
-                                    print(f"✅ Google AI Studio新音声合成成功: {voice_model}")
-                                    return [temp_file.name]
-            
-            print("❌ Google AI Studio新音声: 音声データの取得に失敗")
-            return []
-                
-        except Exception as e:
-            print(f"❌ Google AI Studio新音声エラー: {e}")
-            # フォールバック試行
-            return await self._fallback_new_voice_api(text, voice_model, speed, api_key)
-    
-    async def _fallback_new_voice_api(self, text, voice_model, speed, api_key, primary_error_details="N/A"):
-        """代替新音声APIエンドポイント（2025年5月版・完全実装）"""
-        print(f"🐍 GoogleAIStudioNewVoiceAPI: _fallback_new_voice_api - プライマリAPIエラーのためフォールバック実行。Details: {primary_error_details[:200]}...")
-        try:
-            # 代替エンドポイント1: Multimodal Live API
-            fallback_url = f"{self.api_endpoint}/speech:synthesize"
-            headers = {
-                # "Authorization": f"Bearer {api_key}", # 通常のGoogle API KeyはBearerトークン形式ではないことが多い
-                "Content-Type": "application/json",
-                "x-goog-api-key": api_key # Google APIは通常このヘッダーでキーを指定
-            }
-            
-            request_body = {
-                "model": "gemini-2.5-flash-exp", # Note: このモデルがTTSをサポートしているか確認が必要
-                "audio_config": {
-                    "voice": voice_model, # APIが期待するボイス名形式か確認
-                    "speaking_rate": speed,
-                    "audio_encoding": "LINEAR16", # MP3_FREEなども検討
-                    "sample_rate_hertz": 24000,
-                    "effects_profile_id": ["small-bluetooth-speaker-class-device"]
-                },
-                "input": {
-                    "text": text
-                }
-            }
-            
-            print(f"ℹ️ GoogleAIStudioNewVoiceAPI: _fallback_new_voice_api - API URL: {fallback_url}")
-            print(f"ℹ️ GoogleAIStudioNewVoiceAPI: _fallback_new_voice_api - Request Headers: {headers}")
-            print(f"ℹ️ GoogleAIStudioNewVoiceAPI: _fallback_new_voice_api - Request Body: {json.dumps(request_body, indent=2)}")
-
-            async with aiohttp.ClientSession() as session:
-                async with session.post(
-                    fallback_url,
-                    headers=headers,
-                    json=request_body,
-                    timeout=30
-                ) as response:
-                    response_status = response.status
-                    response_text = await response.text()
-                    print(f"ℹ️ GoogleAIStudioNewVoiceAPI: _fallback_new_voice_api - Response Status: {response_status}")
-                    print(f"ℹ️ GoogleAIStudioNewVoiceAPI: _fallback_new_voice_api - Response Headers: {response.headers}")
-                    print(f"ℹ️ GoogleAIStudioNewVoiceAPI: _fallback_new_voice_api - Response Body: {response_text[:500]}...")
-
-                    if response_status == 200:
-                        try:
-                            response_data = json.loads(response_text)
-                        except json.JSONDecodeError as json_err:
-                            print(f"❌ GoogleAIStudioNewVoiceAPI: _fallback_new_voice_api - JSONデコードエラー: {json_err}")
-                            return await self._experimental_voice_api(text, voice_model, speed, api_key, fallback_error_details="JSON decode error")
-
-                        if 'audioContent' in response_data:
-                            audio_data = base64.b64decode(response_data['audioContent'])
-                            temp_file = tempfile.NamedTemporaryFile(delete=False, suffix=".wav") #LINEAR16なのでwav
-                            temp_file.write(audio_data)
-                            temp_file.close()
-                            print(f"✅ Google AI Studio新音声（代替API Multimodal Live）成功: {voice_model}, File: {temp_file.name}")
-                            return [temp_file.name]
-            
-            # このエンドポイント (https://generativelanguage.googleapis.com/v1beta/speech:synthesize) は404を返しているため、現時点では有効ではない。
-            # そのため、このフォールバックはコメントアウトし、直接次の実験的APIフォールバックに進む。
-            print(f"⚠️ GoogleAIStudioNewVoiceAPI: _fallback_new_voice_api - Multimodal Live API (speech:synthesize) は404のためスキップ。実験的APIを試みます。")
-            # return await self._experimental_voice_api(text, voice_model, speed, api_key, fallback_error_details=response_text if 'response_text' in locals() else primary_error_details)
-            # primary_error_details を引き継ぐか、このAPI呼び出しが実際に試行された場合の response_text を渡す。
-            # ここでは、このAPI呼び出し自体をスキップするので、primary_error_details をそのまま次のフォールバックに渡す。
-            return await self._experimental_voice_api(text, voice_model, speed, api_key, fallback_error_details=primary_error_details)
 
         except Exception as e:
-            print(f"❌ Google AI Studio新音声（代替API Multimodal Live準備中または実行中）エラー: {e}")
+            print(f"❌ Google AI Studio新音声エラー (SDK): {e}")
             import traceback
-            print(f"詳細トレース (fallback): {traceback.format_exc()}")
-            # エラーが発生した場合も、次のフォールバックを試みる
-            return await self._experimental_voice_api(text, voice_model, speed, api_key, fallback_error_details=str(e))
-    
-    async def _experimental_voice_api(self, text, voice_model, speed, api_key, fallback_error_details="N/A"):
-        """実験的音声API（最新機能テスト用）"""
-        print(f"🐍 GoogleAIStudioNewVoiceAPI: _experimental_voice_api - フォールバック実行。Previous Error: {fallback_error_details[:200]}...")
-        try:
-            experimental_url = "https://texttospeech.googleapis.com/v1/text:synthesize" # これはGoogle Cloud TTSの標準エンドポイント
-            headers = {
-                # "Authorization": f"Bearer {api_key}", # Cloud TTSではAPIキーを直接ヘッダーに使うのが一般的
-                "Content-Type": "application/json",
-                "x-goog-api-key": api_key
-            }
-            
-            # Cloud TTS APIに合わせたリクエストボディ
-            # voice_modelは "ja-JP-Wavenet-A" のような形式を期待する
-            # Alloy等は使えないので、汎用的な日本語ボイスにフォールバックするか、エラーとする
-            # ここでは、Alloy等が来た場合でも、試しにリクエストは投げてみるが、失敗する可能性が高い
-            language_code = "ja-JP" # voice_modelから言語を推定するロジックが必要かも
-            if voice_model.startswith("en-"):
-                language_code = "en-US"
-
-            request_body = {
-                "input": {"text": text},
-                "voice": {"name": voice_model, "languageCode": language_code}, # Cloud TTS用のボイス名とLC
-                "audioConfig": {
-                    "audioEncoding": "MP3", # または LINEAR16
-                    "speakingRate": speed,
-                    "pitch": 0,
-                    "volumeGainDb": 0,
-                    # "effectsProfileId": ["small-bluetooth-speaker-class-device"] # Cloud TTSではこのフィールドはない場合がある
-                }
-            }
-            
-            print(f"ℹ️ GoogleAIStudioNewVoiceAPI: _experimental_voice_api - API URL: {experimental_url}")
-            print(f"ℹ️ GoogleAIStudioNewVoiceAPI: _experimental_voice_api - Request Headers: {headers}")
-            print(f"ℹ️ GoogleAIStudioNewVoiceAPI: _experimental_voice_api - Request Body: {json.dumps(request_body, indent=2)}")
-
-            async with aiohttp.ClientSession() as session:
-                async with session.post(
-                    experimental_url,
-                    headers=headers,
-                    json=request_body,
-                    timeout=30
-                ) as response:
-                    response_status = response.status
-                    response_text = await response.text()
-                    print(f"ℹ️ GoogleAIStudioNewVoiceAPI: _experimental_voice_api - Response Status: {response_status}")
-                    print(f"ℹ️ GoogleAIStudioNewVoiceAPI: _experimental_voice_api - Response Headers: {response.headers}")
-                    print(f"ℹ️ GoogleAIStudioNewVoiceAPI: _experimental_voice_api - Response Body: {response_text[:500]}...")
-
-                    if response_status == 200:
-                        try:
-                            response_data = json.loads(response_text)
-                        except json.JSONDecodeError as json_err:
-                            print(f"❌ GoogleAIStudioNewVoiceAPI: _experimental_voice_api - JSONデコードエラー: {json_err}")
-                            return []
-
-                        if 'audioContent' in response_data:
-                            audio_data = base64.b64decode(response_data['audioContent'])
-                            suffix = ".mp3" if request_body["audioConfig"]["audioEncoding"] == "MP3" else ".wav"
-                            temp_file = tempfile.NamedTemporaryFile(delete=False, suffix=suffix)
-                            temp_file.write(audio_data)
-                            temp_file.close()
-                            print(f"✅ Google AI Studio新音声（実験的API/Cloud TTS風）成功: {voice_model}, File: {temp_file.name}")
-                            return [temp_file.name]
-            
-            print(f"⚠️ GoogleAIStudioNewVoiceAPI: _experimental_voice_api - 実験的APIでも合成失敗。")
-            return []
-            
-        except Exception as e:
-            print(f"❌ Google AI Studio新音声（実験的API/Cloud TTS風）エラー: {e}")
-            import traceback
-            print(f"詳細トレース (experimental): {traceback.format_exc()}")
+            print(f"詳細トレース: {traceback.format_exc()}")
+            # SDK利用時は、SDKが内部でリトライやフォールバックを処理する可能性があるため、
+            # ここでの複雑なフォールバック処理は一旦削除する。
+            # 必要であれば、よりシンプルなエラーハンドリングを追加する。
             return []
 
 # Google AI Studio 旧音声合成API（完全復活版）
@@ -1527,7 +1352,7 @@ class CharacterManager:
                 },
                 "voice_settings": {
                     "engine": "google_ai_studio_new",
-                    "model": "Alloy",
+                    "model": "gemini-2.5-flash-preview-tts-alloy", # Updated model name
                     "speed": 1.0
                 }
             },
@@ -1653,7 +1478,7 @@ class CharacterManager:
                 },
                 "voice_settings": {
                     "engine": "google_ai_studio_new",
-                    "model": "Nova",
+                    "model": "gemini-2.5-flash-preview-tts-nova", # Updated model name
                     "speed": 1.0
                 }
             },
@@ -1699,7 +1524,7 @@ class CharacterManager:
         if "voice_settings" not in char_data:
             char_data["voice_settings"] = {
                 "engine": "google_ai_studio_new",  # デフォルトエンジン（最新）
-                "model": "Alloy",
+                "model": "gemini-2.5-flash-preview-tts-alloy", # Updated model name
                 "speed": 1.0,
                 "volume": 1.0
             }
@@ -1723,7 +1548,7 @@ class CharacterManager:
             },
             "voice_settings": {
                 "engine": "google_ai_studio_new",
-                "model": "Alloy",
+                "model": "gemini-2.5-flash-preview-tts-alloy", # Updated model name
                 "speed": 1.0,
                 "volume": 1.0
             }
@@ -1957,7 +1782,22 @@ class CharacterEditDialog:
         # 音声設定
         voice_settings = self.char_data.get('voice_settings', {})
         self.voice_engine_var.set(voice_settings.get('engine', 'google_ai_studio_new'))
-        self.voice_var.set(voice_settings.get('model', 'Alloy'))
+
+        # エンジンを設定した直後にモデルリストを更新して、正しいモデル名のリストを voice_combo に設定する
+        self.update_voice_models()
+
+        # 更新されたモデルリストを元に、保存されていたモデル名を設定する
+        # voice_settings.get('model', ...) のデフォルト値は、リストの最初の要素か、具体的なフォールバック値を指定する
+        default_voice_model_on_load = self.voice_combo['values'][0] if self.voice_combo['values'] else "gemini-2.5-flash-preview-tts-alloy"
+        saved_model = voice_settings.get('model', default_voice_model_on_load)
+
+        # 保存されたモデルが現在のエンジンのリストに存在するか確認
+        if saved_model in self.voice_combo['values']:
+            self.voice_var.set(saved_model)
+        else:
+            # 存在しない場合はリストの最初のモデルを選択 (または固定のデフォルト)
+            self.voice_var.set(default_voice_model_on_load)
+
         self.speed_var.set(voice_settings.get('speed', 1.0))
         
         # 応答設定
@@ -1966,8 +1806,8 @@ class CharacterEditDialog:
         self.emoji_var.set(response_settings.get('use_emojis', True))
         self.emotion_var.set(response_settings.get('emotion_level', '普通'))
         
-        # 音声モデルリストを更新
-        self.update_voice_models()
+        # update_voice_models は既に上で呼び出されているので、ここでは不要
+        # self.update_voice_models()
     
     def on_engine_changed(self, event=None):
         """音声エンジン変更時の処理"""
@@ -1979,9 +1819,12 @@ class CharacterEditDialog:
         
         # エンジンごとに音声モデルを取得
         if engine == "google_ai_studio_new":
-            voices = ["Alloy", "Echo", "Fable", "Onyx", "Nova", "Shimmer", "Kibo", "Yuki", "Hana", "Taro", "Sakura", "Ryo", "Aurora", "Breeze", "Cosmic"]
-            default_voice = "Alloy"
-            info_text = "🚀 2025年5月新追加・最新技術・リアルタイム対応・感情表現・多言語"
+            # voices = ["Alloy", "Echo", "Fable", "Onyx", "Nova", "Shimmer", "Kibo", "Yuki", "Hana", "Taro", "Sakura", "Ryo", "Aurora", "Breeze", "Cosmic"]
+            # default_voice = "Alloy"
+            instance = GoogleAIStudioNewVoiceAPI()
+            voices = instance.get_available_voices()
+            default_voice = voices[0] if voices else "gemini-2.5-flash-preview-tts-alloy"
+            info_text = "🚀 最新SDK利用・gemini-2.5-flash-preview-ttsモデル・リアルタイム対応・多言語"
         elif engine == "avis_speech":
             voices = ["Anneli(ノーマル)", "Anneli(クール)", "Anneli(ささやき)", "Anneli(元気)", "Anneli(悲しみ)", "Anneli(怒り)"]
             default_voice = "Anneli(ノーマル)"
@@ -2091,7 +1934,7 @@ class CharacterEditDialog:
         def run_comparison():
             try:
                 engines_to_test = [
-                    ("google_ai_studio_new", "Alloy"),
+                    ("google_ai_studio_new", "gemini-2.5-flash-preview-tts-alloy"), # Updated model name
                     ("avis_speech", "Anneli(ノーマル)"),
                     ("voicevox", "ずんだもん(ノーマル)"),
                     ("google_cloud_tts", "ja-JP-Wavenet-A"),
@@ -3975,9 +3818,10 @@ class AITuberMainGUI:
         # messagebox.showinfo("テスト", "Google AI Studio (文章生成) のテストは、デバッグタブのAI対話テストをご利用ください。")
         test_text = "これはGoogle AI Studioの新しい音声合成APIのテストです。"
         # Google AI Studioの新音声合成テストを実行
-        threading.Thread(target=self._run_google_ai_studio_test, args=(test_text, "Alloy", 1.0), daemon=True).start()
+        # voice_model はSDKで利用する正しい形式を指定する
+        threading.Thread(target=self._run_google_ai_studio_test, args=(test_text, "gemini-2.5-flash-preview-tts-alloy", 1.0), daemon=True).start()
 
-    def _run_google_ai_studio_test(self, text_to_synthesize, voice_model="Alloy", speed=1.0):
+    def _run_google_ai_studio_test(self, text_to_synthesize, voice_model="gemini-2.5-flash-preview-tts-alloy", speed=1.0):
         """Google AI Studio (New Voice API) の音声合成をテストする内部メソッド"""
         self.log(f"🧪 Google AI Studio 新音声合成テスト開始: Voice: {voice_model}, Speed: {speed}, Text: {text_to_synthesize}")
         api_key = self.config.get_system_setting("google_ai_api_key")
