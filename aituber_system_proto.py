@@ -207,18 +207,24 @@ class GoogleAIStudioNewVoiceAPI(VoiceEngineBase):
         """
         try:
             if not api_key:
+                print("🐍 GoogleAIStudioNewVoiceAPI: synthesize_speech - APIキーが引数で渡されませんでした。環境変数を確認します。")
                 api_key = os.getenv('GOOGLE_AI_API_KEY')
             
             if not api_key:
-                print("❌ Google AI Studio APIキーが設定されていません")
+                print("❌ GoogleAIStudioNewVoiceAPI: synthesize_speech - Google AI Studio APIキーが設定されていません")
                 return []
-            
+            print(f"🔑 GoogleAIStudioNewVoiceAPI: synthesize_speech - 使用するAPIキーの最初の5文字: {api_key[:5]}...")
+
             # 新音声合成API設定（2025年5月版・完全実装）
+            # 401エラーのログから、このエンドポイントはOAuth2トークンを期待している可能性がある。
+            # APIキーのみを使用する場合、'x-goog-api-key' のみが適切か、あるいは別の認証方法が必要。
+            # まずは 'Authorization: Bearer' を削除し、'x-goog-api-key' のみで試す。
             headers = {
-                "Authorization": f"Bearer {api_key}",
+                # "Authorization": f"Bearer {api_key}", # 401エラーの原因の可能性があるためコメントアウト
                 "Content-Type": "application/json",
                 "x-goog-api-key": api_key
             }
+            print(f"⚠️ GoogleAIStudioNewVoiceAPI: synthesize_speech - Authorization: Bearer ヘッダーを削除し、x-goog-api-key のみで試行します。")
             
             # 新APIリクエスト構造（完全版）
             request_body = {
@@ -251,12 +257,26 @@ class GoogleAIStudioNewVoiceAPI(VoiceEngineBase):
                     json=request_body,
                     timeout=30
                 ) as response:
-                    if response.status != 200:
-                        # フォールバック: 代替新APIエンドポイント
-                        return await self._fallback_new_voice_api(text, voice_model, speed, api_key)
+                    response_status = response.status
+                    response_text = await response.text()
+                    print(f"ℹ️ GoogleAIStudioNewVoiceAPI: synthesize_speech - API URL: {response.url}")
+                    print(f"ℹ️ GoogleAIStudioNewVoiceAPI: synthesize_speech - Request Headers: {headers}")
+                    print(f"ℹ️ GoogleAIStudioNewVoiceAPI: synthesize_speech - Request Body: {json.dumps(request_body, indent=2)}")
+                    print(f"ℹ️ GoogleAIStudioNewVoiceAPI: synthesize_speech - Response Status: {response_status}")
+                    print(f"ℹ️ GoogleAIStudioNewVoiceAPI: synthesize_speech - Response Headers: {response.headers}")
+                    print(f"ℹ️ GoogleAIStudioNewVoiceAPI: synthesize_speech - Response Body: {response_text[:500]}...") # Log first 500 chars
+
+                    if response_status != 200:
+                        print(f"⚠️ GoogleAIStudioNewVoiceAPI: synthesize_speech - APIリクエスト失敗、フォールバックを試みます。Status: {response_status}")
+                        return await self._fallback_new_voice_api(text, voice_model, speed, api_key, primary_error_details=response_text)
                     
-                    response_data = await response.json()
-                    
+                    try:
+                        response_data = json.loads(response_text)
+                    except json.JSONDecodeError as json_err:
+                        print(f"❌ GoogleAIStudioNewVoiceAPI: synthesize_speech - JSONデコードエラー: {json_err}")
+                        print(f"❌ GoogleAIStudioNewVoiceAPI: synthesize_speech - 非JSONレスポンス: {response_text[:500]}...")
+                        return await self._fallback_new_voice_api(text, voice_model, speed, api_key, primary_error_details="JSON decode error")
+
                     # 音声データ抽出（完全版）
                     if 'candidates' in response_data and response_data['candidates']:
                         candidate = response_data['candidates'][0]
@@ -282,21 +302,24 @@ class GoogleAIStudioNewVoiceAPI(VoiceEngineBase):
             # フォールバック試行
             return await self._fallback_new_voice_api(text, voice_model, speed, api_key)
     
-    async def _fallback_new_voice_api(self, text, voice_model, speed, api_key):
+    async def _fallback_new_voice_api(self, text, voice_model, speed, api_key, primary_error_details="N/A"):
         """代替新音声APIエンドポイント（2025年5月版・完全実装）"""
+        print(f"🐍 GoogleAIStudioNewVoiceAPI: _fallback_new_voice_api - プライマリAPIエラーのためフォールバック実行。Details: {primary_error_details[:200]}...")
         try:
             # 代替エンドポイント1: Multimodal Live API
+            fallback_url = f"{self.api_endpoint}/speech:synthesize"
             headers = {
-                "Authorization": f"Bearer {api_key}",
-                "Content-Type": "application/json"
+                # "Authorization": f"Bearer {api_key}", # 通常のGoogle API KeyはBearerトークン形式ではないことが多い
+                "Content-Type": "application/json",
+                "x-goog-api-key": api_key # Google APIは通常このヘッダーでキーを指定
             }
             
             request_body = {
-                "model": "gemini-2.5-flash-exp",
+                "model": "gemini-2.5-flash-exp", # Note: このモデルがTTSをサポートしているか確認が必要
                 "audio_config": {
-                    "voice": voice_model,
+                    "voice": voice_model, # APIが期待するボイス名形式か確認
                     "speaking_rate": speed,
-                    "audio_encoding": "LINEAR16",
+                    "audio_encoding": "LINEAR16", # MP3_FREEなども検討
                     "sample_rate_hertz": 24000,
                     "effects_profile_id": ["small-bluetooth-speaker-class-device"]
                 },
@@ -305,80 +328,124 @@ class GoogleAIStudioNewVoiceAPI(VoiceEngineBase):
                 }
             }
             
+            print(f"ℹ️ GoogleAIStudioNewVoiceAPI: _fallback_new_voice_api - API URL: {fallback_url}")
+            print(f"ℹ️ GoogleAIStudioNewVoiceAPI: _fallback_new_voice_api - Request Headers: {headers}")
+            print(f"ℹ️ GoogleAIStudioNewVoiceAPI: _fallback_new_voice_api - Request Body: {json.dumps(request_body, indent=2)}")
+
             async with aiohttp.ClientSession() as session:
                 async with session.post(
-                    f"{self.api_endpoint}/speech:synthesize",
+                    fallback_url,
                     headers=headers,
                     json=request_body,
                     timeout=30
                 ) as response:
-                    if response.status == 200:
-                        response_data = await response.json()
-                        
+                    response_status = response.status
+                    response_text = await response.text()
+                    print(f"ℹ️ GoogleAIStudioNewVoiceAPI: _fallback_new_voice_api - Response Status: {response_status}")
+                    print(f"ℹ️ GoogleAIStudioNewVoiceAPI: _fallback_new_voice_api - Response Headers: {response.headers}")
+                    print(f"ℹ️ GoogleAIStudioNewVoiceAPI: _fallback_new_voice_api - Response Body: {response_text[:500]}...")
+
+                    if response_status == 200:
+                        try:
+                            response_data = json.loads(response_text)
+                        except json.JSONDecodeError as json_err:
+                            print(f"❌ GoogleAIStudioNewVoiceAPI: _fallback_new_voice_api - JSONデコードエラー: {json_err}")
+                            return await self._experimental_voice_api(text, voice_model, speed, api_key, fallback_error_details="JSON decode error")
+
                         if 'audioContent' in response_data:
-                            # 音声データをデコード
                             audio_data = base64.b64decode(response_data['audioContent'])
-                            
-                            # 一時ファイルに保存
-                            temp_file = tempfile.NamedTemporaryFile(delete=False, suffix=".wav")
+                            temp_file = tempfile.NamedTemporaryFile(delete=False, suffix=".wav") #LINEAR16なのでwav
                             temp_file.write(audio_data)
                             temp_file.close()
-                            
-                            print(f"✅ Google AI Studio新音声（代替API）成功: {voice_model}")
+                            print(f"✅ Google AI Studio新音声（代替API Multimodal Live）成功: {voice_model}, File: {temp_file.name}")
                             return [temp_file.name]
             
-            # 代替エンドポイント2: 実験的API
-            return await self._experimental_voice_api(text, voice_model, speed, api_key)
-            
+            # このエンドポイント (https://generativelanguage.googleapis.com/v1beta/speech:synthesize) は404を返しているため、現時点では有効ではない。
+            # そのため、このフォールバックはコメントアウトし、直接次の実験的APIフォールバックに進む。
+            print(f"⚠️ GoogleAIStudioNewVoiceAPI: _fallback_new_voice_api - Multimodal Live API (speech:synthesize) は404のためスキップ。実験的APIを試みます。")
+            # return await self._experimental_voice_api(text, voice_model, speed, api_key, fallback_error_details=response_text if 'response_text' in locals() else primary_error_details)
+            # primary_error_details を引き継ぐか、このAPI呼び出しが実際に試行された場合の response_text を渡す。
+            # ここでは、このAPI呼び出し自体をスキップするので、primary_error_details をそのまま次のフォールバックに渡す。
+            return await self._experimental_voice_api(text, voice_model, speed, api_key, fallback_error_details=primary_error_details)
+
         except Exception as e:
-            print(f"❌ Google AI Studio新音声（代替API）エラー: {e}")
-            return []
+            print(f"❌ Google AI Studio新音声（代替API Multimodal Live準備中または実行中）エラー: {e}")
+            import traceback
+            print(f"詳細トレース (fallback): {traceback.format_exc()}")
+            # エラーが発生した場合も、次のフォールバックを試みる
+            return await self._experimental_voice_api(text, voice_model, speed, api_key, fallback_error_details=str(e))
     
-    async def _experimental_voice_api(self, text, voice_model, speed, api_key):
+    async def _experimental_voice_api(self, text, voice_model, speed, api_key, fallback_error_details="N/A"):
         """実験的音声API（最新機能テスト用）"""
+        print(f"🐍 GoogleAIStudioNewVoiceAPI: _experimental_voice_api - フォールバック実行。Previous Error: {fallback_error_details[:200]}...")
         try:
-            # 実験的エンドポイント
+            experimental_url = "https://texttospeech.googleapis.com/v1/text:synthesize" # これはGoogle Cloud TTSの標準エンドポイント
             headers = {
-                "Authorization": f"Bearer {api_key}",
-                "Content-Type": "application/json"
+                # "Authorization": f"Bearer {api_key}", # Cloud TTSではAPIキーを直接ヘッダーに使うのが一般的
+                "Content-Type": "application/json",
+                "x-goog-api-key": api_key
             }
             
+            # Cloud TTS APIに合わせたリクエストボディ
+            # voice_modelは "ja-JP-Wavenet-A" のような形式を期待する
+            # Alloy等は使えないので、汎用的な日本語ボイスにフォールバックするか、エラーとする
+            # ここでは、Alloy等が来た場合でも、試しにリクエストは投げてみるが、失敗する可能性が高い
+            language_code = "ja-JP" # voice_modelから言語を推定するロジックが必要かも
+            if voice_model.startswith("en-"):
+                language_code = "en-US"
+
             request_body = {
                 "input": {"text": text},
-                "voice": {"name": voice_model, "languageCode": "ja-JP"},
+                "voice": {"name": voice_model, "languageCode": language_code}, # Cloud TTS用のボイス名とLC
                 "audioConfig": {
-                    "audioEncoding": "MP3",
+                    "audioEncoding": "MP3", # または LINEAR16
                     "speakingRate": speed,
                     "pitch": 0,
                     "volumeGainDb": 0,
-                    "effectsProfileId": ["small-bluetooth-speaker-class-device"]
+                    # "effectsProfileId": ["small-bluetooth-speaker-class-device"] # Cloud TTSではこのフィールドはない場合がある
                 }
             }
             
+            print(f"ℹ️ GoogleAIStudioNewVoiceAPI: _experimental_voice_api - API URL: {experimental_url}")
+            print(f"ℹ️ GoogleAIStudioNewVoiceAPI: _experimental_voice_api - Request Headers: {headers}")
+            print(f"ℹ️ GoogleAIStudioNewVoiceAPI: _experimental_voice_api - Request Body: {json.dumps(request_body, indent=2)}")
+
             async with aiohttp.ClientSession() as session:
                 async with session.post(
-                    "https://texttospeech.googleapis.com/v1/text:synthesize",
+                    experimental_url,
                     headers=headers,
                     json=request_body,
                     timeout=30
                 ) as response:
-                    if response.status == 200:
-                        response_data = await response.json()
-                        
+                    response_status = response.status
+                    response_text = await response.text()
+                    print(f"ℹ️ GoogleAIStudioNewVoiceAPI: _experimental_voice_api - Response Status: {response_status}")
+                    print(f"ℹ️ GoogleAIStudioNewVoiceAPI: _experimental_voice_api - Response Headers: {response.headers}")
+                    print(f"ℹ️ GoogleAIStudioNewVoiceAPI: _experimental_voice_api - Response Body: {response_text[:500]}...")
+
+                    if response_status == 200:
+                        try:
+                            response_data = json.loads(response_text)
+                        except json.JSONDecodeError as json_err:
+                            print(f"❌ GoogleAIStudioNewVoiceAPI: _experimental_voice_api - JSONデコードエラー: {json_err}")
+                            return []
+
                         if 'audioContent' in response_data:
                             audio_data = base64.b64decode(response_data['audioContent'])
-                            
-                            temp_file = tempfile.NamedTemporaryFile(delete=False, suffix=".mp3")
+                            suffix = ".mp3" if request_body["audioConfig"]["audioEncoding"] == "MP3" else ".wav"
+                            temp_file = tempfile.NamedTemporaryFile(delete=False, suffix=suffix)
                             temp_file.write(audio_data)
                             temp_file.close()
-                            
-                            print(f"✅ Google AI Studio新音声（実験API）成功: {voice_model}")
+                            print(f"✅ Google AI Studio新音声（実験的API/Cloud TTS風）成功: {voice_model}, File: {temp_file.name}")
                             return [temp_file.name]
             
+            print(f"⚠️ GoogleAIStudioNewVoiceAPI: _experimental_voice_api - 実験的APIでも合成失敗。")
             return []
             
         except Exception as e:
-            print(f"❌ Google AI Studio新音声（実験API）エラー: {e}")
+            print(f"❌ Google AI Studio新音声（実験的API/Cloud TTS風）エラー: {e}")
+            import traceback
+            print(f"詳細トレース (experimental): {traceback.format_exc()}")
             return []
 
 # Google AI Studio 旧音声合成API（完全復活版）
@@ -1063,21 +1130,34 @@ try {{
 '''
             
             process = await asyncio.create_subprocess_exec(
-                "powershell", "-Command", ps_script,
+                "powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", ps_script,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE
             )
             
             stdout, stderr = await process.communicate()
             
-            if process.returncode == 0:
-                return True
+            stdout_decoded = stdout.decode('utf-8', errors='ignore').strip()
+            stderr_decoded = stderr.decode('utf-8', errors='ignore').strip()
+
+            if stdout_decoded:
+                print(f"SystemTTSAPI._windows_tts PowerShell STDOUT: {stdout_decoded}")
+            if stderr_decoded:
+                print(f"SystemTTSAPI._windows_tts PowerShell STDERR: {stderr_decoded}")
+
+            if process.returncode == 0 and "Error:" not in stderr_decoded and "エラー:" not in stderr_decoded:
+                if os.path.exists(output_file) and os.path.getsize(output_file) > 0:
+                    print(f"✅ SystemTTSAPI._windows_tts: 音声ファイル生成成功 {output_file}")
+                    return True
+                else:
+                    print(f"❌ SystemTTSAPI._windows_tts: PowerShellは成功しましたが、音声ファイルが空または存在しません: {output_file}")
+                    return False
             else:
-                print(f"PowerShell TTS エラー: {stderr.decode()}")
+                print(f"❌ SystemTTSAPI._windows_tts: PowerShell TTS エラー (returncode={process.returncode}): {stderr_decoded}")
                 return False
             
         except Exception as e:
-            print(f"Windows TTS実行エラー: {e}")
+            print(f"❌ Windows TTS実行エラー: {e}")
             return False
     
     async def _macos_tts(self, text, output_file, voice_model, speed):
@@ -1210,27 +1290,67 @@ Add-Type -AssemblyName presentationCore
 $mediaPlayer = New-Object system.windows.media.mediaplayer
 $mediaPlayer.open("{audio_file}")
 $mediaPlayer.Play()
-while($mediaPlayer.position -lt $mediaPlayer.naturalDuration) {{
+# Wait for media to open and duration to be available
+$loaded = $False
+for ($i = 0; $i -lt 50; $i++) {{ # Max 5 seconds wait
+    if ($mediaPlayer.NaturalDuration.HasTimeSpan) {{
+        $loaded = $True
+        break
+    }}
     Start-Sleep -Milliseconds 100
+}}
+if ($loaded -and $mediaPlayer.NaturalDuration.TimeSpan.TotalSeconds -gt 0) {{
+    Write-Host "Media loaded. Duration: $($mediaPlayer.NaturalDuration.TimeSpan.TotalSeconds)s"
+    while($mediaPlayer.Position -lt $mediaPlayer.NaturalDuration.TimeSpan) {{
+        Start-Sleep -Milliseconds 100
+    }}
+    Write-Host "Playback finished."
+}} else {{
+    Write-Host "Error: MediaPlayer did not load media correctly or media has zero duration."
+    # Fallback for very short sounds or if duration is not correctly reported, just wait a bit
+    Start-Sleep -Seconds 2 # Wait 2 seconds as a fallback
 }}
 $mediaPlayer.Stop()
 $mediaPlayer.Close()
 '''
             
             process = await asyncio.create_subprocess_exec(
-                "powershell", "-Command", ps_script,
+                "powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", ps_script,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE
             )
-            await process.wait()
-            
+            stdout, stderr = await process.communicate()
+
+            stdout_decoded = stdout.decode('utf-8', errors='ignore').strip()
+            stderr_decoded = stderr.decode('utf-8', errors='ignore').strip()
+
+            if stdout_decoded:
+                print(f"AudioPlayer._play_windows PowerShell STDOUT: {stdout_decoded}")
+            if stderr_decoded:
+                print(f"AudioPlayer._play_windows PowerShell STDERR: {stderr_decoded}")
+
+            if process.returncode != 0 or "エラー" in stderr_decoded.lower() or "error" in stderr_decoded.lower():
+                print(f"❌ AudioPlayer._play_windows: PowerShell再生エラー (returncode={process.returncode}): {stderr_decoded}")
+                print(f"🐍 AudioPlayer: PowerShellでの再生に失敗したため、winsoundにフォールバックします: {audio_file}")
+                try:
+                    import winsound
+                    # winsound.PlaySoundは非同期ではないため、スレッドで実行してブロッキングを防ぐ
+                    await asyncio.to_thread(winsound.PlaySound, audio_file, winsound.SND_FILENAME | winsound.SND_ASYNC)
+                    print(f"✅ AudioPlayer: winsound.PlaySound ({audio_file}) の呼び出しを試みました (非同期)。")
+                except Exception as winsound_e:
+                    print(f"❌ AudioPlayer: winsound.PlaySound でもエラーが発生しました: {winsound_e}")
+            else:
+                print(f"✅ AudioPlayer._play_windows: PowerShellによる音声再生成功: {audio_file}")
+
         except Exception as e:
-            print(f"Windows音声再生エラー: {e}")
+            print(f"❌ Windows音声再生エラー (PowerShell呼び出し前): {e}")
+            print(f"🐍 AudioPlayer: PowerShell呼び出し前にエラーが発生したため、winsoundにフォールバックします: {audio_file}")
             try:
                 import winsound
-                await asyncio.to_thread(winsound.PlaySound, audio_file, winsound.SND_FILENAME)
-            except:
-                pass
+                await asyncio.to_thread(winsound.PlaySound, audio_file, winsound.SND_FILENAME | winsound.SND_ASYNC)
+                print(f"✅ AudioPlayer: winsound.PlaySound ({audio_file}) の呼び出しを試みました (非同期)。")
+            except Exception as winsound_e:
+                print(f"❌ AudioPlayer: winsound.PlaySound でもエラーが発生しました: {winsound_e}")
     
     async def _play_macos(self, audio_file):
         """macOS用音声再生（完全版）"""
@@ -3717,7 +3837,126 @@ class AITuberMainGUI:
         self.log(f"🚀 キャラクター '{char_data['name']}' のパフォーマンスベンチマークを開始します...")
         
         # 非同期でベンチマーク実行
+        # threading.Thread(target=self._run_performance_benchmark, args=(char_data,), daemon=True).start()
+        # messagebox.showinfo("パフォーマンスベンチマーク", "この機能は現在実装中です。")
+        if not self.current_character_id:
+            messagebox.showwarning("キャラクター未選択", "パフォーマンスベンチマークを行うには、まずキャラクターを選択してください。")
+            return
+
+        char_data = self.config.get_character(self.current_character_id)
+        if not char_data:
+            messagebox.showerror("エラー", "キャラクターデータが見つかりません")
+            return
+
+        self.log(f"🚀 キャラクター '{char_data['name']}' のパフォーマンスベンチマークを開始します...")
         threading.Thread(target=self._run_performance_benchmark, args=(char_data,), daemon=True).start()
+
+    def _run_performance_benchmark(self, char_data):
+        """キャラクターの音声合成パフォーマンスを測定する内部メソッド"""
+        self.log(f"📊 ベンチマーク開始: キャラクター '{char_data.get('name', 'Unknown')}'")
+
+        voice_settings = char_data.get('voice_settings', {})
+        engine_name = voice_settings.get('engine', 'system_tts')
+        voice_model = voice_settings.get('model', 'default')
+        speed = voice_settings.get('speed', 1.0)
+
+        if engine_name not in self.voice_manager.engines:
+            self.log(f"❌ ベンチマークエラー: エンジン '{engine_name}' が見つかりません。")
+            messagebox.showerror("ベンチマークエラー", f"音声エンジン '{engine_name}' がシステムに登録されていません。")
+            return
+
+        engine_instance = self.voice_manager.engines[engine_name]
+
+        test_texts = [
+            ("短い挨拶", "こんにちは"),
+            ("一般的な質問", "今日の天気はどうですか？"),
+            ("少し長めの説明", "この音声合成システムは、複数のエンジンに対応しています。"),
+            ("感情表現を含む可能性のあるテキスト", "わーい！とても嬉しいです！ありがとう！"),
+            ("長いニュース記事風のテキスト", "本日未明、東京スカイツリーの頂上に謎の飛行物体が確認され、専門家チームが調査を開始しました。詳細は追って報告される予定です。")
+        ]
+
+        results = []
+        api_key_google_ai = self.config.get_system_setting("google_ai_api_key")
+        api_key_google_cloud = self.config.get_system_setting("google_cloud_api_key")
+
+        loop = None
+        try:
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+
+            for description, text_to_synthesize in test_texts:
+                self.log(f"🔄 テスト中: '{description}' (長さ: {len(text_to_synthesize)}文字)")
+                start_time = time.time()
+
+                kwargs = {}
+                if "google_ai_studio" in engine_name:
+                    kwargs['api_key'] = api_key_google_ai
+                elif engine_name == "google_cloud_tts":
+                    kwargs['api_key'] = api_key_google_cloud
+
+                audio_files = loop.run_until_complete(
+                    engine_instance.synthesize_speech(text_to_synthesize, voice_model, speed, **kwargs)
+                )
+
+                end_time = time.time()
+                duration = end_time - start_time
+
+                if audio_files:
+                    self.log(f"✅ 成功: {duration:.3f}秒 - {audio_files[0] if audio_files else 'No file'}")
+                    results.append({
+                        "description": description,
+                        "text_length": len(text_to_synthesize),
+                        "duration_seconds": duration,
+                        "success": True,
+                        "output_file": audio_files[0] if audio_files else None
+                    })
+                    # Optionally play the audio for quick verification during testing
+                    # audio_player = AudioPlayer()
+                    # loop.run_until_complete(audio_player.play_audio_files(audio_files))
+                else:
+                    self.log(f"❌ 失敗: {duration:.3f}秒")
+                    results.append({
+                        "description": description,
+                        "text_length": len(text_to_synthesize),
+                        "duration_seconds": duration,
+                        "success": False,
+                        "output_file": None
+                    })
+                time.sleep(0.5) # Avoid overwhelming the API/engine
+
+            self.log("📊 ベンチマーク結果:")
+            total_duration = 0
+            successful_syntheses = 0
+            for res in results:
+                status = "成功" if res["success"] else "失敗"
+                self.log(f"  - {res['description']} ({res['text_length']}文字): {res['duration_seconds']:.3f}秒 [{status}]")
+                if res["success"]:
+                    total_duration += res["duration_seconds"]
+                    successful_syntheses +=1
+
+            avg_duration = total_duration / successful_syntheses if successful_syntheses > 0 else 0
+            self.log(f"平均合成時間 (成功分のみ): {avg_duration:.3f}秒")
+            self.log(f"合計成功数: {successful_syntheses}/{len(test_texts)}")
+
+            # GUIに結果を表示 (簡易的にメッセージボックスで)
+            result_summary_gui = f"ベンチマーク完了: {char_data.get('name', 'Unknown')} ({engine_name}/{voice_model})\n"
+            result_summary_gui += f"合計テスト数: {len(test_texts)}\n"
+            result_summary_gui += f"成功数: {successful_syntheses}\n"
+            result_summary_gui += f"平均合成時間 (成功分): {avg_duration:.3f}秒\n\n詳細はログを確認してください。"
+            messagebox.showinfo("パフォーマンスベンチマーク完了", result_summary_gui)
+
+        except Exception as e:
+            self.log(f"❌ ベンチマーク中にエラーが発生しました: {e}")
+            import traceback
+            self.log(f"詳細トレース: {traceback.format_exc()}")
+            messagebox.showerror("ベンチマークエラー", f"ベンチマーク中にエラーが発生しました: {e}")
+        finally:
+            if loop:
+                try:
+                    loop.close()
+                except Exception as e:
+                    self.log(f"⚠️ イベントループクローズエラー（ベンチマーク）: {e}")
+
 
     def test_google_ai_studio(self):
         """Google AI Studioの文章生成機能をテスト"""
@@ -3731,7 +3970,56 @@ class AITuberMainGUI:
         self.log(f"📝 Google AI Studio 文章生成テスト開始: {test_prompt}")
         
         # 非同期で文章生成実行
-        threading.Thread(target=self._run_google_ai_studio_test, args=(test_prompt,), daemon=True).start()
+        # threading.Thread(target=self._run_google_ai_studio_test, args=(test_prompt,), daemon=True).start() # Placeholder for actual test
+        # self.log("Google AI Studio Test (Text Gen) - Not implemented yet in this fashion, see chat test.")
+        # messagebox.showinfo("テスト", "Google AI Studio (文章生成) のテストは、デバッグタブのAI対話テストをご利用ください。")
+        test_text = "これはGoogle AI Studioの新しい音声合成APIのテストです。"
+        # Google AI Studioの新音声合成テストを実行
+        threading.Thread(target=self._run_google_ai_studio_test, args=(test_text, "Alloy", 1.0), daemon=True).start()
+
+    def _run_google_ai_studio_test(self, text_to_synthesize, voice_model="Alloy", speed=1.0):
+        """Google AI Studio (New Voice API) の音声合成をテストする内部メソッド"""
+        self.log(f"🧪 Google AI Studio 新音声合成テスト開始: Voice: {voice_model}, Speed: {speed}, Text: {text_to_synthesize}")
+        api_key = self.config.get_system_setting("google_ai_api_key")
+        if not api_key:
+            self.log("❌ Google AI Studio APIキーが設定されていません。")
+            messagebox.showerror("APIキーエラー", "Google AI Studio APIキーが設定されていません。")
+            return
+
+        loop = None
+        try:
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+
+            engine = GoogleAIStudioNewVoiceAPI()
+            audio_files = loop.run_until_complete(
+                engine.synthesize_speech(text_to_synthesize, voice_model, speed, api_key=api_key)
+            )
+
+            if audio_files:
+                self.log(f"✅ 音声ファイル生成成功: {audio_files}")
+                audio_player = AudioPlayer()
+                loop.run_until_complete(
+                    audio_player.play_audio_files(audio_files)
+                )
+                self.log("🎧 音声再生完了")
+                messagebox.showinfo("音声テスト成功", f"Google AI Studio 新音声合成 ({voice_model}) のテスト再生が完了しました。")
+            else:
+                self.log("❌ 音声ファイルの生成に失敗しました。")
+                messagebox.showerror("音声テスト失敗", f"Google AI Studio 新音声合成 ({voice_model}) で音声ファイルの生成に失敗しました。詳細はログを確認してください。")
+
+        except Exception as e:
+            self.log(f"❌ Google AI Studio 新音声合成テスト中にエラーが発生しました: {e}")
+            import traceback
+            self.log(f"詳細トレース: {traceback.format_exc()}")
+            messagebox.showerror("テストエラー", f"Google AI Studio 新音声合成テスト中にエラーが発生しました: {e}")
+        finally:
+            if loop:
+                try:
+                    loop.close()
+                except Exception as e:
+                    self.log(f"⚠️ イベントループクローズエラー: {e}")
+
 
     def test_google_cloud_tts(self):
         """Google Cloud TTSの音声合成機能をテスト"""
