@@ -147,6 +147,32 @@ class ConfigManager:
         """全キャラクターのリストを取得"""
         return self.config.get("characters", {})
 
+    def reset_system_settings(self):
+        """システム設定をデフォルトに戻す"""
+        default_config = self.create_default_config()
+        self.config["system_settings"] = default_config.get("system_settings", {})
+        self.save_config()
+        print("システム設定がデフォルトにリセットされました。")
+
+    def get_all_system_settings(self):
+        """現在のシステム設定全体を返す"""
+        return self.config.get("system_settings", {}).copy() # コピーを返して内部辞書を保護
+
+    def set_all_system_settings(self, new_settings_dict):
+        """システム設定全体を指定された辞書で更新する"""
+        if not isinstance(new_settings_dict, dict):
+            print("エラー: set_all_system_settings には辞書を指定してください。")
+            return
+
+        # 既存の system_settings を完全に置き換えるか、キーごとに更新するかを選択できます。
+        # ここでは、完全に置き換える実装とします。
+        # 必要であれば、キーの検証や部分的な更新を行うことも可能です。
+        self.config["system_settings"] = new_settings_dict.copy() # 安全のためコピーを保存
+
+        if self.config.get("system_settings", {}).get("auto_save", True): # auto_save設定を尊重
+            self.save_config()
+        print("システム設定が更新されました。")
+
 # 音声エンジン基底クラス（完全版）
 class VoiceEngineBase:
     """音声エンジンの基底クラス - 完全版"""
@@ -1406,6 +1432,60 @@ class VoiceEngineManager:
         print("❌ 全ての音声エンジンで合成に失敗しました")
         return []
 
+    def get_all_voices(self):
+        """全てのエンジンで利用可能な音声モデルのリストを返す（エンジン名とモデルのペアのリストなど）。"""
+        all_voices_map = {}
+        for engine_name, engine_instance in self.engines.items():
+            try:
+                # get_available_voices() がリストを返すことを期待
+                available_voices = engine_instance.get_available_voices()
+                if available_voices: # 空リストでないことを確認
+                    all_voices_map[engine_name] = available_voices
+                else:
+                    all_voices_map[engine_name] = ["(利用可能な音声なし)"]
+            except NotImplementedError:
+                all_voices_map[engine_name] = ["(未実装)"]
+            except Exception as e:
+                print(f"エラー: {engine_name} の音声取得中にエラーが発生しました: {e}")
+                all_voices_map[engine_name] = ["(取得エラー)"]
+        return all_voices_map
+
+    def add_voice(self, voice_data):
+        """
+        新しい音声モデルを特定のエンジンに追加する機能。
+        主に設定の復元を想定。
+        現状のエンジン実装では、音声リストはエンジンクラス内で定義されているため、
+        実行時に動的に追加する標準的な方法は提供されていません。
+        このメソッドは将来的な拡張用、または特定のエンジンが動的追加をサポートする場合のためのプレースホルダーです。
+        """
+        # voice_data は {"engine_name": "some_engine", "model_name": "new_voice_model", ...} のような辞書を期待
+        engine_name = voice_data.get("engine_name")
+        model_name = voice_data.get("model_name")
+
+        if not engine_name or not model_name:
+            print("エラー: add_voice には engine_name と model_name が必要です。")
+            return
+
+        if engine_name in self.engines:
+            # エンジンインスタンスが動的な音声追加をサポートしているか確認
+            # 例えば、self.engines[engine_name].add_voice_model(model_name, ...) のようなメソッドがあれば呼び出す
+            # 現状の実装ではそのようなメソッドはないため、ログ出力に留める
+            print(f"情報: エンジン '{engine_name}' に音声 '{model_name}' を追加するリクエストを受け取りました。")
+            print(f"注意: 現在のエンジン実装では、実行時の動的な音声モデル追加は標準サポートされていません。")
+            # もし特定のエンジン（例：カスタムTTSエンジンなど）が対応している場合は、ここで分岐処理を行う
+            #例:
+            # if hasattr(self.engines[engine_name], "add_model"):
+            #     self.engines[engine_name].add_model(model_name, voice_data.get("path_to_model_file"))
+            #     print(f"'{model_name}' が '{engine_name}' に追加されました。")
+            # else:
+            #     print(f"エンジン '{engine_name}' は動的な音声追加をサポートしていません。")
+        else:
+            print(f"エラー: エンジン '{engine_name}' は登録されていません。")
+
+    def get_current_engine_name(self):
+        """現在選択されている音声エンジンの名前を返す。"""
+        return self.current_engine
+
 # キャラクター管理システム v2.2（6エンジン完全対応版）
 class CharacterManager:
     """キャラクター作成・編集・管理システム v2.2（6エンジン完全対応・機能削減なし）"""
@@ -1643,6 +1723,41 @@ class CharacterManager:
         response_settings = char_data.get("response_settings", {})
         voice_settings = char_data.get("voice_settings", {})
         
+        prompt = f"""
+あなたは「{char_data.get('name', '')}」という名前のAITuberです。
+
+性格と話し方：
+- 基本的な口調: {personality.get('base_tone', '')}
+- 話し方のスタイル: {personality.get('speech_style', '')}
+- キャラクターの特徴: {', '.join(personality.get('character_traits', []))}
+- 好きな話題: {', '.join(personality.get('favorite_topics', []))}
+
+返答のルール：
+- 文章の長さ: {response_settings.get('max_length', '1-2文程度')}
+- 絵文字の使用: {'積極的に使用' if response_settings.get('use_emojis', True) else '控えめに使用'}
+- 感情表現: {response_settings.get('emotion_level', '普通')}レベル
+
+技術情報：
+- 音声エンジン: {voice_settings.get('engine', 'google_ai_studio_new')}
+- 音声モデル: {voice_settings.get('model', 'Alloy')}
+
+視聴者との自然で親しみやすい会話を心がけてください。
+YouTubeライブ配信での短時間の応答に適した内容にしてください。
+あなたのキャラクター性を活かした魅力的な応答をしてください。
+        """
+        return prompt.strip()
+
+    def get_all_characters(self):
+        """保存されている全てのキャラクターデータを辞書として返す。"""
+        return self.config.get_all_characters()
+
+# キャラクター編集ダイアログ（6エンジン完全対応版）
+class CharacterEditDialog:
+
+        personality = char_data.get("personality", {})
+        response_settings = char_data.get("response_settings", {})
+        voice_settings = char_data.get("voice_settings", {})
+
         prompt = f"""
 あなたは「{char_data.get('name', '')}」という名前のAITuberです。
 
@@ -3644,7 +3759,7 @@ class AITuberMainGUI:
             f"配信状態: {'配信中' if self.is_streaming else '停止中'}\n"
             f"Google AI APIキー: {'設定済み' if self.config.get_system_setting('google_ai_api_key') else '未設定'}\n"
             f"YouTube APIキー: {'設定済み' if self.config.get_system_setting('youtube_api_key') else '未設定'}\n"
-            f"音声エンジン: {self.voice_manager.get_active_engine()}\n"
+            f"音声エンジン: {self.voice_manager.get_current_engine_name()}\n"
         )
         
         messagebox.showinfo("システムステータス", status_text)
@@ -3773,6 +3888,109 @@ class AITuberMainGUI:
         
         # 非同期でパフォーマンス測定実行
         threading.Thread(target=self._run_performance_measurement, args=(char_data,), daemon=True).start()
+
+    def _run_performance_measurement(self, char_data):
+        """キャラクターの音声合成パフォーマンスを測定する内部メソッド"""
+        self.log(f"📊 パフォーマンス測定開始: キャラクター '{char_data.get('name', 'Unknown')}'")
+
+        voice_settings = char_data.get('voice_settings', {})
+        engine_name = voice_settings.get('engine', 'system_tts')
+        voice_model = voice_settings.get('model', 'default')
+        speed = voice_settings.get('speed', 1.0)
+
+        if engine_name not in self.voice_manager.engines:
+            self.log(f"❌ パフォーマンス測定エラー: エンジン '{engine_name}' が見つかりません。")
+            messagebox.showerror("測定エラー", f"音声エンジン '{engine_name}' がシステムに登録されていません。")
+            return
+
+        engine_instance = self.voice_manager.engines[engine_name]
+
+        test_texts = [
+            ("短い挨拶", "こんにちは"),
+            ("一般的な質問", "今日の天気はどうですか？"),
+            ("少し長めの説明", "この音声合成システムは、複数のエンジンに対応しています。"),
+            ("感情表現を含む可能性のあるテキスト", "わーい！とても嬉しいです！ありがとう！"),
+            ("長いニュース記事風のテキスト", "本日未明、東京スカイツリーの頂上に謎の飛行物体が確認され、専門家チームが調査を開始しました。詳細は追って報告される予定です。")
+        ]
+
+        results = []
+        api_key_google_ai = self.config.get_system_setting("google_ai_api_key")
+        api_key_google_cloud = self.config.get_system_setting("google_cloud_api_key")
+
+        loop = None
+        try:
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+
+            for description, text_to_synthesize in test_texts:
+                self.log(f"🔄 テスト中: '{description}' (長さ: {len(text_to_synthesize)}文字)")
+                start_time = time.time()
+
+                kwargs = {}
+                if "google_ai_studio" in engine_name:
+                    kwargs['api_key'] = api_key_google_ai
+                elif engine_name == "google_cloud_tts":
+                    kwargs['api_key'] = api_key_google_cloud
+
+                audio_files = loop.run_until_complete(
+                    engine_instance.synthesize_speech(text_to_synthesize, voice_model, speed, **kwargs)
+                )
+
+                end_time = time.time()
+                duration = end_time - start_time
+
+                if audio_files:
+                    self.log(f"✅ 成功: {duration:.3f}秒 - {audio_files[0] if audio_files else 'No file'}")
+                    results.append({
+                        "description": description,
+                        "text_length": len(text_to_synthesize),
+                        "duration_seconds": duration,
+                        "success": True,
+                        "output_file": audio_files[0] if audio_files else None
+                    })
+                else:
+                    self.log(f"❌ 失敗: {duration:.3f}秒")
+                    results.append({
+                        "description": description,
+                        "text_length": len(text_to_synthesize),
+                        "duration_seconds": duration,
+                        "success": False,
+                        "output_file": None
+                    })
+                time.sleep(0.5) # Avoid overwhelming the API/engine
+
+            self.log("📊 パフォーマンス測定結果:")
+            total_duration = 0
+            successful_syntheses = 0
+            for res in results:
+                status = "成功" if res["success"] else "失敗"
+                self.log(f"  - {res['description']} ({res['text_length']}文字): {res['duration_seconds']:.3f}秒 [{status}]")
+                if res["success"]:
+                    total_duration += res["duration_seconds"]
+                    successful_syntheses +=1
+
+            avg_duration = total_duration / successful_syntheses if successful_syntheses > 0 else 0
+            self.log(f"平均合成時間 (成功分のみ): {avg_duration:.3f}秒")
+            self.log(f"合計成功数: {successful_syntheses}/{len(test_texts)}")
+
+            # GUIに結果を表示 (簡易的にメッセージボックスで)
+            result_summary_gui = f"パフォーマンス測定完了: {char_data.get('name', 'Unknown')} ({engine_name}/{voice_model})\n"
+            result_summary_gui += f"合計テスト数: {len(test_texts)}\n"
+            result_summary_gui += f"成功数: {successful_syntheses}\n"
+            result_summary_gui += f"平均合成時間 (成功分): {avg_duration:.3f}秒\n\n詳細はログを確認してください。"
+            messagebox.showinfo("パフォーマンス測定完了", result_summary_gui)
+
+        except Exception as e:
+            self.log(f"❌ パフォーマンス測定中にエラーが発生しました: {e}")
+            import traceback
+            self.log(f"詳細トレース: {traceback.format_exc()}")
+            messagebox.showerror("測定エラー", f"パフォーマンス測定中にエラーが発生しました: {e}")
+        finally:
+            if loop:
+                try:
+                    loop.close()
+                except Exception as e:
+                     self.log(f"⚠️ イベントループクローズエラー（パフォーマンス測定）: {e}")
 
     def run_performance_benchmark(self):
         """キャラクターのパフォーマンスベンチマークを実行"""
@@ -3988,17 +4206,140 @@ class AITuberMainGUI:
         # 非同期で音声合成実行
         threading.Thread(target=self._run_google_cloud_tts_test, args=(test_text,), daemon=True).start()
 
+    def _run_google_cloud_tts_test(self, text_to_synthesize, voice_model="ja-JP-Wavenet-A", speed=1.0):
+        """Google Cloud TTS の音声合成をテストする内部メソッド"""
+        self.log(f"🧪 Google Cloud TTS 音声合成テスト開始: Voice: {voice_model}, Speed: {speed}, Text: {text_to_synthesize}")
+        api_key = self.config.get_system_setting("google_cloud_api_key")
+        if not api_key:
+            self.log("❌ Google Cloud TTS APIキーが設定されていません。")
+            messagebox.showerror("APIキーエラー", "Google Cloud TTS APIキーが設定されていません。")
+            return
+
+        loop = None
+        try:
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+
+            engine = GoogleCloudTTSAPI()
+            # GoogleCloudTTSAPI の synthesize_speech は api_key をキーワード引数として受け取ります
+            audio_files = loop.run_until_complete(
+                engine.synthesize_speech(text_to_synthesize, voice_model, speed, api_key=api_key)
+            )
+
+            if audio_files:
+                self.log(f"✅ 音声ファイル生成成功: {audio_files}")
+                audio_player = AudioPlayer()
+                loop.run_until_complete(
+                    audio_player.play_audio_files(audio_files)
+                )
+                self.log("🎧 音声再生完了")
+                messagebox.showinfo("音声テスト成功", f"Google Cloud TTS ({voice_model}) のテスト再生が完了しました。")
+            else:
+                self.log("❌ 音声ファイルの生成に失敗しました。")
+                messagebox.showerror("音声テスト失敗", f"Google Cloud TTS ({voice_model}) で音声ファイルの生成に失敗しました。詳細はログを確認してください。")
+
+        except Exception as e:
+            self.log(f"❌ Google Cloud TTS テスト中にエラーが発生しました: {e}")
+            import traceback
+            self.log(f"詳細トレース: {traceback.format_exc()}")
+            messagebox.showerror("テストエラー", f"Google Cloud TTS テスト中にエラーが発生しました: {e}")
+        finally:
+            if loop:
+                try:
+                    loop.close()
+                except Exception as e:
+                    self.log(f"⚠️ イベントループクローズエラー: {e}")
+
     def test_youtube_api(self):
         """YouTube APIの接続テスト"""
-        if not self.config.get_system_setting("youtube_api_key"):
+        api_key = self.config.get_system_setting("youtube_api_key")
+        if not api_key:
             messagebox.showwarning("APIキー未設定", "YouTube APIキーを設定してください")
+            self.log("❌ YouTube API テスト: APIキーが設定されていません。")
             return
+
+        self.log("🧪 YouTube API 接続テスト開始...")
+
+        # テストとして、チャンネル情報などを取得する簡単なリクエストを試みる
+        # ここでは、テスト目的で 'GoogleDevelopers' チャンネルの情報を取得してみます。
+        # 実際のアプリケーションでは、より適切なエンドポイントやパラメータを使用してください。
+        test_channel_id = "UC_x5XG1OV2P6uZZ5FSM9Ttw" # Google DevelopersチャンネルID (例)
+        url = f"https://www.googleapis.com/youtube/v3/channels?part=snippet&id={test_channel_id}&key={api_key}"
+
+        try:
+            response = requests.get(url, timeout=10)
+            response.raise_for_status()  # HTTPエラーがあれば例外を発生させる
+
+            data = response.json()
+            if 'items' in data and data['items']:
+                channel_name = data['items'][0]['snippet']['title']
+                self.log(f"✅ YouTube API 接続成功。テストチャンネル名: {channel_name}")
+                messagebox.showinfo("YouTube APIテスト成功", f"YouTube APIに正常に接続できました。\nテストチャンネル '{channel_name}' の情報を取得しました。")
+            else:
+                self.log("⚠️ YouTube API 接続成功しましたが、期待されるデータ形式ではありませんでした。")
+                messagebox.showwarning("YouTube APIテスト警告", "YouTube APIには接続できましたが、レスポンスが期待した形式ではありませんでした。")
+
+        except requests.exceptions.HTTPError as http_err:
+            self.log(f"❌ YouTube API HTTPエラー: {http_err.response.status_code} - {http_err.response.text}")
+            messagebox.showerror("YouTube APIテスト失敗", f"YouTube APIへの接続に失敗しました (HTTPエラー)。\nステータス: {http_err.response.status_code}\n詳細はログを確認してください。")
+        except requests.exceptions.RequestException as req_err:
+            self.log(f"❌ YouTube API リクエストエラー: {req_err}")
+            messagebox.showerror("YouTube APIテスト失敗", f"YouTube APIへのリクエスト中にエラーが発生しました。\nエラー: {req_err}\n詳細はログを確認してください。")
+        except Exception as e:
+            self.log(f"❌ YouTube API テスト中に予期せぬエラー: {e}")
+            import traceback
+            self.log(f"詳細トレース: {traceback.format_exc()}")
+            messagebox.showerror("YouTube APIテストエラー", f"YouTube APIのテスト中に予期せぬエラーが発生しました: {e}")
 
     def test_avis_speech(self):
         """Avis Speech Engineの音声合成機能をテスト"""
-        if not self.config.get_system_setting("avis_speech_api_key"):
-            messagebox.showwarning("APIキー未設定", "Avis Speech Engine APIキーを設定してください")
-            return
+        # Avis Speech はローカルエンジンなので、APIキー設定の確認は不要。
+        # 代わりに、エンジンが起動しているか（/speakers エンドポイントにアクセス可能か）を確認する。
+        # ただし、このボタンから直接テストする際は、CharacterEditDialog の test_voice のような
+        # 音声合成と再生を行うのがユーザーにとって分かりやすい。
+        # ここでは、AvisSpeechEngineAPI の check_availability を呼び出す形にする。
+
+        self.log("🧪 Avis Speech Engine 接続テスト開始...")
+
+        loop = None
+        try:
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+
+            engine = AvisSpeechEngineAPI()
+            is_available = loop.run_until_complete(engine.check_availability())
+
+            if is_available:
+                self.log("✅ Avis Speech Engine は利用可能です。")
+                # 利用可能な音声も表示
+                voices = engine.get_available_voices()
+                voices_str = ", ".join(voices[:5]) + ("..." if len(voices) > 5 else "")
+                messagebox.showinfo("Avis Speechテスト成功", f"Avis Speech Engineに接続できました。\n利用可能な音声 (一部): {voices_str}")
+            else:
+                self.log("❌ Avis Speech Engine は利用できません。エンジンが起動しているか確認してください。")
+                messagebox.showerror("Avis Speechテスト失敗", "Avis Speech Engineに接続できませんでした。\nエンジンがローカルで起動しているか、ポート設定（デフォルト: 10101）を確認してください。")
+
+        except Exception as e:
+            self.log(f"❌ Avis Speech Engine テスト中にエラー: {e}")
+            import traceback
+            self.log(f"詳細トレース: {traceback.format_exc()}")
+            messagebox.showerror("Avis Speechテストエラー", f"Avis Speech Engineのテスト中にエラーが発生しました: {e}")
+        finally:
+            if loop:
+                try:
+                    loop.close()
+                except Exception as e:
+                    self.log(f"⚠️ イベントループクローズエラー (Avis Speech Test): {e}")
+
+        # より完全なテストとして、実際の音声合成と再生を行う場合は以下のようにする
+        # test_text = "これはAvis Speech Engineの音声合成テストです。"
+        # self.log(f"🔊 Avis Speech Engine 音声合成テスト開始: {test_text}")
+        # threading.Thread(target=self._run_avis_speech_test, args=(test_text,), daemon=True).start()
+        # ただし、_run_avis_speech_test はまだ定義されていないので注意。
+        # このステップでは、APIキーの代わりに接続性を確認する方向で実装。
+        # if not self.config.get_system_setting("avis_speech_api_key"):
+        # messagebox.showwarning("APIキー未設定", "Avis Speech Engine APIキーを設定してください")
+        # return
         
         # テスト用のテキスト
         test_text = "こんにちは、これはAvis Speech Engineの音声合成テストです。"
@@ -4008,17 +4349,79 @@ class AITuberMainGUI:
         # 非同期で音声合成実行
         threading.Thread(target=self._run_avis_speech_test, args=(test_text,), daemon=True).start()
 
+    def _run_avis_speech_test(self, text_to_synthesize, voice_model="Anneli(ノーマル)", speed=1.0):
+        """Avis Speech Engine の音声合成をテストする内部メソッド"""
+        self.log(f"🧪 Avis Speech Engine 音声合成テスト開始: Voice: {voice_model}, Speed: {speed}, Text: {text_to_synthesize}")
 
-    def send_random_message():
+        loop = None
+        try:
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+
+            engine = AvisSpeechEngineAPI()
+
+            # まずエンジンが利用可能かチェック
+            is_available = loop.run_until_complete(engine.check_availability())
+            if not is_available:
+                self.log("❌ Avis Speech Engine は利用できません。エンジンが起動しているか確認してください。")
+                messagebox.showerror("Avis Speechテスト失敗", "Avis Speech Engineに接続できませんでした。\nエンジンがローカルで起動しているか、ポート設定（デフォルト: 10101）を確認してください。")
+                return
+
+            audio_files = loop.run_until_complete(
+                engine.synthesize_speech(text_to_synthesize, voice_model, speed)
+            )
+
+            if audio_files:
+                self.log(f"✅ 音声ファイル生成成功: {audio_files}")
+                audio_player = AudioPlayer()
+                loop.run_until_complete(
+                    audio_player.play_audio_files(audio_files)
+                )
+                self.log("🎧 音声再生完了")
+                messagebox.showinfo("音声テスト成功", f"Avis Speech Engine ({voice_model}) のテスト再生が完了しました。")
+            else:
+                self.log("❌ 音声ファイルの生成に失敗しました。")
+                messagebox.showerror("音声テスト失敗", f"Avis Speech Engine ({voice_model}) で音声ファイルの生成に失敗しました。詳細はログを確認してください。")
+
+        except Exception as e:
+            self.log(f"❌ Avis Speech Engine テスト中にエラーが発生しました: {e}")
+            import traceback
+            self.log(f"詳細トレース: {traceback.format_exc()}")
+            messagebox.showerror("テストエラー", f"Avis Speech Engine テスト中にエラーが発生しました: {e}")
+        finally:
+            if loop:
+                try:
+                    loop.close()
+                except Exception as e:
+                    self.log(f"⚠️ イベントループクローズエラー (Avis Speech Run Test): {e}")
+
+    def send_random_message(self):
         """ランダムなメッセージを送信するデバッグ用関数"""
+        if not self.current_character_id:
+            self.chat_display.insert(tk.END, "❌ システム: キャラクターが選択されていません。\n")
+            self.chat_display.see(tk.END)
+            self.log("⚠️ ランダムメッセージ送信失敗: キャラクター未選択")
+            return
+
         messages = [
             "こんにちは！今日はどんなことを話しましょうか？",
             "AIちゃん、元気ですか？",
             "最近のおすすめのアニメは何ですか？",
             "AIちゃんの好きな食べ物は何ですか？",
-            "次の配信はいつですか？"
+            "次の配信はいつですか？",
+            "今日のラッキーアイテムは何だろう？",
+            "面白いジョークを一つ教えて！",
+            "週末の予定はもう決まった？",
+            "おすすめのゲームがあったら教えてほしいな。",
+            "疲れたときにリフレッシュする方法ってある？"
         ]
-        return random.choice(messages)
+
+        import random # random モジュールをインポート
+        chosen_message = random.choice(messages)
+
+        self.chat_input_var.set(chosen_message) # 入力フィールドにも表示（任意）
+        self.send_test_message() # send_test_message を呼び出して送信処理を行う
+        self.log(f"💬 ランダムメッセージ送信: {chosen_message}")
 
     def reset_settings(self):
         """システム設定を初期状態にリセット"""
@@ -4161,6 +4564,53 @@ class AITuberMainGUI:
         
         # 非同期で音声合成実行
         threading.Thread(target=self._run_voicevox_test, args=(test_text,), daemon=True).start()
+
+    def _run_voicevox_test(self, text_to_synthesize, voice_model="ずんだもん(ノーマル)", speed=1.0):
+        """VOICEVOX Engine の音声合成をテストする内部メソッド"""
+        self.log(f"🧪 VOICEVOX Engine 音声合成テスト開始: Voice: {voice_model}, Speed: {speed}, Text: {text_to_synthesize}")
+
+        # VOICEVOX はローカルエンジンなので、APIキー設定の確認は不要。
+        loop = None
+        try:
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+
+            engine = VOICEVOXEngineAPI()
+
+            # まずエンジンが利用可能かチェック
+            is_available = loop.run_until_complete(engine.check_availability())
+            if not is_available:
+                self.log("❌ VOICEVOX Engine は利用できません。エンジンが起動しているか確認してください。")
+                messagebox.showerror("VOICEVOXテスト失敗", "VOICEVOX Engineに接続できませんでした。\nエンジンがローカルで起動しているか、ポート設定（デフォルト: 50021）を確認してください。")
+                return
+
+            audio_files = loop.run_until_complete(
+                engine.synthesize_speech(text_to_synthesize, voice_model, speed)
+            )
+
+            if audio_files:
+                self.log(f"✅ 音声ファイル生成成功: {audio_files}")
+                audio_player = AudioPlayer()
+                loop.run_until_complete(
+                    audio_player.play_audio_files(audio_files)
+                )
+                self.log("🎧 音声再生完了")
+                messagebox.showinfo("音声テスト成功", f"VOICEVOX Engine ({voice_model}) のテスト再生が完了しました。")
+            else:
+                self.log("❌ 音声ファイルの生成に失敗しました。")
+                messagebox.showerror("音声テスト失敗", f"VOICEVOX Engine ({voice_model}) で音声ファイルの生成に失敗しました。詳細はログを確認してください。")
+
+        except Exception as e:
+            self.log(f"❌ VOICEVOX Engine テスト中にエラーが発生しました: {e}")
+            import traceback
+            self.log(f"詳細トレース: {traceback.format_exc()}")
+            messagebox.showerror("テストエラー", f"VOICEVOX Engine テスト中にエラーが発生しました: {e}")
+        finally:
+            if loop:
+                try:
+                    loop.close()
+                except Exception as e:
+                    self.log(f"⚠️ イベントループクローズエラー (VOICEVOX Run Test): {e}")
 
     def clear_chat(self):
         """チャット表示をクリア"""
