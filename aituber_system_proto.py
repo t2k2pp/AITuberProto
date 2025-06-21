@@ -250,7 +250,7 @@ class GoogleAIStudioNewVoiceAPI(VoiceEngineBase):
             "description": "2025年5月新追加・最新技術・リアルタイム対応・感情表現"
         }
     
-    async def synthesize_speech(self, text, voice_model="gemini-2.5-flash-preview-tts-alloy", speed=1.0, api_key=None, **kwargs):
+    async def synthesize_speech(self, text, voice_model="puck", speed=1.0, api_key=None, **kwargs): # 修正: デフォルト引数を短い形式に
         """
         Google AI Studio 新音声合成 (SDK版 v202506)
         使用モデル: gemini-2.5-flash-preview-tts (または gemini-2.5-pro-preview-tts)
@@ -2128,7 +2128,7 @@ class CharacterEditDialog:
         def run_comparison():
             try:
                 engines_to_test = [
-                    ("google_ai_studio_new", "gemini-2.5-flash-preview-tts-alloy"), # Updated model name
+                    ("google_ai_studio_new", "puck"), # 修正: 短い形式の音声名に変更 (例: "puck")
                     ("avis_speech", "Anneli(ノーマル)"),
                     ("voicevox", "ずんだもん(ノーマル)"),
                     ("google_cloud_tts", "ja-JP-Wavenet-A"),
