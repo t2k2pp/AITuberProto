@@ -41,6 +41,7 @@ from pathlib import Path
 import aiohttp
 #import urllib.parse
 import base64
+import wave # wave モジュールをインポート
 
 # 設定管理クラス（完全版）
 class ConfigManager:
@@ -178,23 +179,33 @@ class GoogleAIStudioNewVoiceAPI(VoiceEngineBase):
     def __init__(self):
         self.max_length = 2000 # 一般的なTTSの上限として維持、SDKでは具体的に言及なし
         # Google AI Studio TTS (gemini-2.5-flash-preview-tts) で利用可能な音声名。
-        # これらはSDKの `PrebuiltVoiceConfig` の `voice_name` パラメータで使用する。
-        # 参考: https://ai.google.dev/gemini-api/docs/speech-generation#voice_options
-        # ドキュメント記載の30種類に加え、既存のUIやテンプレートで使われていた可能性のある名前も追加。
-        official_voice_names = [
-            "Zephyr", "Puck", "Charon", "Kore", "Fenrir", "Leda", "Orus", "Aoede",
-            "Callirrhoe", "Autonoe", "Enceladus", "Iapetus", "Umbriel", "Algieba",
-            "Despina", "Erinome", "Algenib", "Rasalgethi", "Laomedeia", "Achernar",
-            "Alnilam", "Schedar", "Gacrux", "Pulcherrima", "Achird", "Zubenelgenubi",
-            "Vindemiatrix", "Sadachbia", "Sadaltager", "Sulafat"
+        # APIエラーメッセージから取得したサポートされている音声名リスト (2025-06-21時点)
+        # 'Voice name Alloy is not supported. Allowed voice names are: achernar, achird, algenib, algieba, alnilam, aoede, autonoe, callirrhoe, charon, despina, enceladus, erinome, fenrir, gacrux, iapetus, kore, laomedeia, leda, orus, puck, pulcherrima, rasalgethi, sadachbia, sadaltager, schedar, sulafat, umbriel, vindemiatrix, zephyr, zubenelgenubi'
+        supported_voice_names_from_api = [
+            "achernar", "achird", "algenib", "algieba", "alnilam", "aoede", "autonoe",
+            "callirrhoe", "charon", "despina", "enceladus", "erinome", "fenrir",
+            "gacrux", "iapetus", "kore", "laomedeia", "leda", "orus", "puck",
+            "pulcherrima", "rasalgethi", "sadachbia", "sadaltager", "schedar",
+            "sulafat", "umbriel", "vindemiatrix", "zephyr", "zubenelgenubi"
         ]
-        # 以前のコードやUIのデフォルト値で使われていた可能性のある名前 (大文字化して統一)
-        legacy_short_names = ["Alloy", "Echo", "Fable", "Onyx", "Nova", "Shimmer"]
 
-        self.voice_models = list(dict.fromkeys(official_voice_names + legacy_short_names)) # 重複を除いて結合
+        # voice_models はAPIがサポートする短い名前のリストとする
+        self.voice_models = sorted(list(set(supported_voice_names_from_api)))
 
         # self.api_endpoint = "https://generativelanguage.googleapis.com/v1beta" # SDK利用のため不要
+        self.client = None # synthesize_speech でAPIキーと共に初期化
     
+    def _initialize_client(self, api_key=None):
+        if self.client is None:
+            if api_key:
+                self.client = genai.Client(api_key=api_key)
+            else:
+                # 環境変数などから自動で設定されることを期待
+                self.client = genai.Client()
+        elif api_key: # 既にクライアントがあるが、新しいAPIキーが指定された場合
+             self.client = genai.Client(api_key=api_key)
+
+
     def get_available_voices(self):
         """
         利用可能な音声モデル名（短い形式、例: "Kore", "Alloy"）のリストを返す。
@@ -223,13 +234,15 @@ class GoogleAIStudioNewVoiceAPI(VoiceEngineBase):
         """
         try:
             # APIキーの取り扱い:
+            # クラスインスタンスのクライアントを初期化/更新
+            self._initialize_client(api_key)
             # - 引数 `api_key` が指定されていれば、それを使用して genai.Client を初期化。
             # - 指定されていなければ、事前に `genai.configure(api_key=...)` が呼び出されているか、
             #   環境変数 `GOOGLE_API_KEY` が設定されていることを期待して `genai.Client()` を使用。
-            if api_key:
-                client = genai.Client(api_key=api_key)
-            else:
-                client = genai.Client()
+            # if api_key: # _initialize_client で処理
+            #     client = genai.Client(api_key=api_key)
+            # else:
+            #     client = genai.Client()
 
 
 
@@ -256,43 +269,87 @@ class GoogleAIStudioNewVoiceAPI(VoiceEngineBase):
                 ),
             )
 
-            # `client.models.generate_content` はブロッキング呼び出しのため、非同期コンテキストで実行するために `asyncio.to_thread` を使用。
-            response = await asyncio.to_thread(
-                client.models.generate_content, # `GenerativeModel` インスタンスではなく `Client().models` から呼び出す
-                model=tts_model_name,           # TTS専用モデル名 (例: "gemini-2.5-flash-preview-tts")
-                contents=text,                  # 合成するテキスト
-                generation_config=generation_config # 上記で作成した音声合成用設定
+            # 音声合成のためのツール設定
+            # ドキュメント (https://ai.google.dev/gemini-api/docs/speech-generation#sample_code) を参照
+            # `Tool` と `SpeechGenerationConfig` を使用する
+
+            # `GeminiVoiceChatApp` のサンプルコードに基づき、`config` パラメータを使用する方式に変更
+            # TTS専用モデル名は tts_model_name ("gemini-2.5-flash-preview-tts") を使用
+            # contents は text (合成するテキスト)
+            # voice_model はSDKで指定する短い音声名 (例: "Alloy", "Puck")
+
+            # 音声合成のための設定オブジェクトを作成 (genai.types を使用)
+            generation_and_speech_config = genai.types.GenerateContentConfig(
+                response_modalities=["AUDIO"],
+                speech_config=genai.types.SpeechConfig(
+                    voice_config=genai.types.VoiceConfig(
+                        prebuilt_voice_config=genai.types.PrebuiltVoiceConfig(
+                            voice_name=voice_model # 例: "Alloy", "Puck"
+                        )
+                    )
+                )
             )
 
-            # レスポンスから音声データを抽出
+            # `client.models.generate_content` を使用 (サンプルコードに合わせる)
+            # あるいは、`genai.GenerativeModel(model_name=tts_model_name).generate_content(...)` も考えられるが、
+            # サンプルでは client インスタンスの models 経由で呼び出している。
+            # aituber_system_proto.py の client は genai.Client() で初期化されている。
+
+            response = await asyncio.to_thread(
+                self.client.models.generate_content, # client インスタンスを使用 (GeminiVoiceChatAppと同様)
+                model=tts_model_name,                # TTS専用モデル名
+                contents=text,                       # 合成するテキスト (サンプルでは f"Say...: {text}" となっているが、ここでは元のtextをそのまま使用)
+                config=generation_and_speech_config  # ここで GenerateContentConfig を渡す
+            )
+
+            # レスポンスから音声データを抽出 (サンプルコードの構造に合わせる)
+            # ドキュメントのレスポンス構造に基づき修正
             if response and response.candidates and response.candidates[0].content and response.candidates[0].content.parts:
-                audio_part = response.candidates[0].content.parts[0]
-                if audio_part.inline_data and audio_part.inline_data.data:
+                # ツール呼び出しの結果は parts の中に function_call ではなく、直接 inline_data として返ってくる場合がある
+                # または、ToolConfig で指定した modality (AUDIO) に基づいて parts の中に音声データが含まれる
+                audio_part = None
+                for part in response.candidates[0].content.parts:
+                    if part.inline_data and part.inline_data.mime_type.startswith("audio/"):
+                        audio_part = part
+                        break
+
+                if audio_part and audio_part.inline_data and audio_part.inline_data.data:
                     audio_data = audio_part.inline_data.data
 
-                    # 音声データを一時ファイルに保存。
-                    # ドキュメントの例では .wav 形式で保存しているため、それに倣う。
-                    # (SDKが出力する実際の形式はドキュメントに明記されていないが、通常MP3またはWAV)
-                    temp_file = tempfile.NamedTemporaryFile(delete=False, suffix=".wav")
-                    temp_file.write(audio_data)
-                    temp_file.close()
+                    # 音声データを一時ファイルに保存 (waveモジュール使用)
+                    # 標準的なPCMフォーマットを想定: 24kHz, 1チャンネル, 16bit
+                    # APIが実際に返す形式に合わせて調整が必要な場合がある
+                    temp_wav_file = tempfile.NamedTemporaryFile(delete=False, suffix=".wav")
+                    temp_filename = temp_wav_file.name
+                    temp_wav_file.close() # ファイル名を確保するために一度閉じる
 
-                    print(f"✅ Google AI Studio新音声合成成功 (SDK): Voice: {voice_model}, File: {temp_file.name}")
-                    return [temp_file.name]
+                    try:
+                        with wave.open(temp_filename, "wb") as wf:
+                            wf.setnchannels(1)  # モノラル
+                            wf.setsampwidth(2)  # 16ビット (2バイト)
+                            wf.setframerate(24000)  # 24kHz サンプリングレート
+                            wf.writeframes(audio_data)
+                        print(f"✅ Google AI Studio新音声合成成功 (SDK v2, wave_module): Voice: {voice_model}, File: {temp_filename}")
+                        return [temp_filename]
+                    except Exception as wave_write_error:
+                        print(f"❌ Google AI Studio新音声 (SDK v2): WAVファイル書き込みエラー: {wave_write_error}")
+                        if os.path.exists(temp_filename):
+                            os.unlink(temp_filename) # エラー時はファイルを削除
+                        return []
                 else:
-                    print(f"❌ Google AI Studio新音声 (SDK): レスポンスに音声データ (inline_data.data) が含まれていません。Audio Part: {audio_part}")
+                    print(f"❌ Google AI Studio新音声 (SDK v2): レスポンスに音声データ (inline_data.data with audio MIME type) が含まれていません。Parts: {response.candidates[0].content.parts}")
                     return []
             else:
-                print(f"❌ Google AI Studio新音声 (SDK): APIから期待される形式のレスポンスが得られませんでした。Response: {response}")
+                error_message = "APIから期待される形式のレスポンスが得られませんでした。"
+                if response and response.prompt_feedback:
+                    error_message += f" Prompt Feedback: {response.prompt_feedback}"
+                print(f"❌ Google AI Studio新音声 (SDK v2): {error_message} Response: {response}")
                 return []
 
         except Exception as e:
-            print(f"❌ Google AI Studio新音声エラー (SDK Main): {e}")
+            print(f"❌ Google AI Studio新音声エラー (SDK Main v2): {e}")
             import traceback
             print(f"詳細トレース: {traceback.format_exc()}")
-            # SDK利用時は、SDKが内部でリトライやフォールバックを処理する可能性があるため、
-            # ここでの複雑なフォールバック処理は一旦削除する。
-            # 必要であれば、よりシンプルなエラーハンドリングを追加する。
             return []
 
 # Google AI Studio 旧音声合成API（完全復活版）
@@ -1374,7 +1431,7 @@ class CharacterManager:
                 },
                 "voice_settings": {
                     "engine": "google_ai_studio_new",
-                    "model": "gemini-2.5-flash-preview-tts-alloy", # Updated model name
+                    "model": "puck", # Updated model name to a supported one
                     "speed": 1.0
                 }
             },
@@ -1500,7 +1557,7 @@ class CharacterManager:
                 },
                 "voice_settings": {
                     "engine": "google_ai_studio_new",
-                    "model": "gemini-2.5-flash-preview-tts-nova", # Updated model name
+                    "model": "puck", # Updated model name to a supported one
                     "speed": 1.0
                 }
             },
@@ -1546,7 +1603,7 @@ class CharacterManager:
         if "voice_settings" not in char_data:
             char_data["voice_settings"] = {
                 "engine": "google_ai_studio_new",  # デフォルトエンジン（最新）
-                "model": "gemini-2.5-flash-preview-tts-alloy", # Updated model name
+                "model": "puck", # Updated model name to a supported one
                 "speed": 1.0,
                 "volume": 1.0
             }
@@ -1872,11 +1929,10 @@ class CharacterEditDialog:
         
         # エンジンごとに音声モデルを取得
         if engine == "google_ai_studio_new":
-            # voices = ["Alloy", "Echo", "Fable", "Onyx", "Nova", "Shimmer", "Kibo", "Yuki", "Hana", "Taro", "Sakura", "Ryo", "Aurora", "Breeze", "Cosmic"]
-            # default_voice = "Alloy"
             instance = GoogleAIStudioNewVoiceAPI()
             voices = instance.get_available_voices()
-            default_voice = voices[0] if voices else "gemini-2.5-flash-preview-tts-alloy"
+            # default_voice はAPIがサポートするリストの最初のものにする
+            default_voice = voices[0] if voices else "puck" # フォールバックとして "puck" (APIエラーリストより)
             info_text = "🚀 最新SDK利用・gemini-2.5-flash-preview-ttsモデル・リアルタイム対応・多言語"
         elif engine == "avis_speech":
             voices = ["Anneli(ノーマル)", "Anneli(クール)", "Anneli(ささやき)", "Anneli(元気)", "Anneli(悲しみ)", "Anneli(怒り)"]
