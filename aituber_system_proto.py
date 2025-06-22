@@ -21,9 +21,9 @@ Google AI Studio新音声合成（2025年5月追加）+ Google Cloud TTS + Avis 
 
 import tkinter as tk
 from tkinter import ttk, messagebox, filedialog, simpledialog
-from google import genai
-from google.generativeai import types
-#import google.generativeai as genai
+from google import genai # 公式ドキュメント推奨
+from google.genai import types # 公式ドキュメント推奨
+#import google.generativeai as genai # コメントアウト
 import requests
 import asyncio
 import json
@@ -3498,8 +3498,10 @@ class AITuberMainGUI:
                 self.root.after(0, lambda: self.chat_display.see(tk.END))
                 return
             
-            genai.configure(api_key=api_key)
-            model = genai.GenerativeModel('gemini-2.5-flash')
+            # genai.configure(api_key=api_key) # コメントアウトのまま
+            # model = genai.GenerativeModel('gemini-2.5-flash') # 旧方式
+
+            client = genai.Client(api_key=api_key) # Client を初期化
             
             # キャラクタープロンプト取得
             char_prompt = self.character_manager.get_character_prompt(self.current_character_id)
@@ -3508,8 +3510,16 @@ class AITuberMainGUI:
             # AI応答生成（文章生成のみ）
             full_prompt = f"{char_prompt}\n\nユーザー: {message}\n\n自然で親しみやすい返答をしてください。"
             
-            response = model.generate_content(full_prompt)
-            ai_response = response.text.strip()
+            # response = model.generate_content(full_prompt) # 旧方式
+            text_response = client.models.generate_content(
+                model="gemini-1.5-flash", # テキスト生成に適したモデル (gemini-2.5-flashでも可)
+                contents=full_prompt,
+                config=genai.types.GenerateContentConfig( # 引数名を config に修正
+                    temperature=0.9,
+                    max_output_tokens=150
+                )
+            )
+            ai_response = text_response.text.strip()
             
             # GUI更新
             self.root.after(0, lambda: self.chat_display.insert(tk.END, f"🤖 {char_name}: {ai_response}\n"))
@@ -4665,8 +4675,9 @@ class AITuberStreamingSystem:
         
         # Google AI Studio設定（文章生成専用）
         api_key = self.config.get_system_setting("google_ai_api_key")
-        genai.configure(api_key=api_key)
-        self.model = genai.GenerativeModel('gemini-2.5-flash')
+        # genai.configure(api_key=api_key) # コメントアウトのまま
+        # self.model = genai.GenerativeModel('gemini-2.5-flash') # 旧方式
+        self.client = genai.Client(api_key=api_key) # Client を初期化してインスタンス変数に格納
         
         # YouTube API設定
         self.youtube_api_key = self.config.get_system_setting("youtube_api_key")
@@ -4793,17 +4804,27 @@ class AITuberStreamingSystem:
             full_prompt = f"{char_prompt}\n\n視聴者 {author_name}: {comment_text}\n\n親しみやすく自然な返答をしてください。"
             
             # AI応答生成（文章生成のみ）
-            response = await asyncio.to_thread(
-                self.model.generate_content,
-                full_prompt,
-                generation_config={
-                    'temperature': 0.9,
-                    'max_output_tokens': 100,
-                    'top_p': 0.8
-                }
+            # response = await asyncio.to_thread( # 旧方式
+            #     self.model.generate_content,
+            #     full_prompt,
+            #     generation_config={
+            #         'temperature': 0.9,
+            #         'max_output_tokens': 100,
+            #         'top_p': 0.8
+            #     }
+            # )
+            text_response = await asyncio.to_thread(
+                self.client.models.generate_content, # client を使用
+                model="gemini-1.5-flash",  # テキスト生成に適したモデル
+                contents=full_prompt,
+                config=genai.types.GenerateContentConfig( # 引数名を config に修正
+                    temperature=0.9,
+                    max_output_tokens=100, # ストリーミングなので短めに
+                    top_p=0.8
+                )
             )
             
-            return response.text.strip()
+            return text_response.text.strip()
             
         except Exception as e:
             self.log(f"応答生成エラー: {e}")
