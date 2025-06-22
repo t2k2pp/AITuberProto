@@ -1,16 +1,16 @@
 """
-完全版 AITuberシステム v2.2 - 6エンジン完全対応版（機能削減なし）
-Google AI Studio新音声合成（2025年5月追加）+ Google Cloud TTS + Avis Speech + VOICEVOX + 旧Google AI Studio + システムTTS
+完全版 AITuberシステム v2.2 - 4エンジン完全対応版（機能削減なし）
+Google AI Studio新音声合成（2025年5月追加）+ Avis Speech + VOICEVOX + システムTTS
 
 重要な追加:
 - Google AI Studio 新音声合成API（2025年5月追加）に完全対応
 - 既存の全機能を維持・拡張（機能削減なし）
-- 6つの音声エンジン完全統合
-- 全メソッドを6エンジン対応で完全実装
-- フォールバック機能を6エンジンに完全拡張
+- 4つの音声エンジン完全統合
+- 全メソッドを4エンジン対応で完全実装
+- フォールバック機能を4エンジンに完全拡張
 
 機能（全て完全実装・機能削減なし）:
-- 6つの音声エンジン統合（最新技術完全対応）
+- 4つの音声エンジン統合（最新技術完全対応）
 - 完全設定ファイル管理
 - 複数キャラクター作成・編集・管理・複製・削除
 - 完全デバッグ・テスト機能
@@ -47,7 +47,7 @@ import wave # wave モジュールをインポート
 class ConfigManager:
     """
     統一設定管理システム v2.2 - 完全版
-    6エンジン対応・全ての設定をJSONファイルで管理
+    4エンジン対応・全ての設定をJSONファイルで管理
     """
     
     def __init__(self, config_file="aituber_config_v22.json"):
@@ -71,7 +71,6 @@ class ConfigManager:
         return {
             "system_settings": {
                 "google_ai_api_key": "",           # 文章生成＋新音声合成
-                "google_cloud_api_key": "",        # 従来の高品質音声合成
                 "youtube_api_key": "",
                 "voice_engine": "google_ai_studio_new",  # デフォルトは最新
                 "auto_save": True,
@@ -96,8 +95,6 @@ class ConfigManager:
                 "google_ai_studio_new",    # 最新・2025年5月追加
                 "avis_speech",             # 高品質・無料・ローカル
                 "voicevox",                # 定番キャラ・無料・ローカル
-                "google_cloud_tts",        # 従来の最高品質・有料
-                "google_ai_studio_legacy", # 旧Google AI Studio TTS
                 "system_tts"               # フォールバック
             ]
         }
@@ -377,160 +374,6 @@ class GoogleAIStudioNewVoiceAPI(VoiceEngineBase):
             import traceback
             print(f"詳細トレース: {traceback.format_exc()}")
             return []
-
-# Google AI Studio 旧音声合成API（完全復活版）
-class GoogleAIStudioLegacyVoiceAPI(VoiceEngineBase):
-    """
-    Google AI Studio 旧音声合成API（完全復活版）
-    従来のGemini TTSとの互換性完全維持
-    """
-    
-    def __init__(self):
-        self.max_length = 1000
-        self.voice_models = [
-            "Kore", "Autonoe", "Charon", "Fenrir", 
-            "Aoede", "Puck", "Anthea", "Urania",
-            "Neptune", "Callisto", "Titan", "Oberon",
-            "Clio", "Erato", "Euterpe", "Melpomene"
-        ]
-    
-    def get_available_voices(self):
-        return self.voice_models
-    
-    def get_max_text_length(self):
-        return self.max_length
-    
-    def get_engine_info(self):
-        return {
-            "name": "Google AI Studio 旧音声",
-            "cost": "無料枠",
-            "quality": "★★★☆☆",
-            "description": "従来版・互換性維持・安定動作・クラシック音声"
-        }
-    
-    async def synthesize_speech(self, text, voice_model="Kore", speed=1.0, api_key=None, **kwargs):
-        """
-        旧Google AI Studio音声合成（完全互換性維持版）
-        """
-        try:
-            if not api_key:
-                print("❌ Google AI Studio APIキーが設定されていません")
-                return []
-            
-            genai.configure(api_key=api_key)
-            
-            # 旧音声生成用プロンプト（完全版）
-            speed_prompt = ""
-            if speed < 0.8:
-                speed_prompt = "Please speak slowly and clearly with careful pronunciation. "
-            elif speed > 1.2:
-                speed_prompt = "Please speak a bit faster with energetic delivery. "
-            
-            voice_style_prompt = self._get_voice_style_prompt(voice_model)
-            audio_prompt = f"{speed_prompt}{voice_style_prompt}Please read this text aloud: {text}"
-            
-            # 旧API使用（テキスト生成ベース）
-            model = genai.GenerativeModel('gemini-1.5-flash')
-            
-            # 音声スタイル指示を含む応答生成
-            style_response = await asyncio.to_thread(
-                model.generate_content,
-                f"Convert this text to spoken style with {voice_model} voice characteristics: {text}"
-            )
-            
-            spoken_text = style_response.text.strip() if style_response.text else text
-            
-            # システムTTSで実際の音声合成（旧API風）
-            temp_file = tempfile.NamedTemporaryFile(delete=False, suffix=".wav")
-            temp_file.close()
-            
-            success = await self._legacy_tts_synthesis(spoken_text, temp_file.name, voice_model, speed)
-            
-            if success and os.path.exists(temp_file.name) and os.path.getsize(temp_file.name) > 0:
-                print(f"✅ Google AI Studio旧音声合成成功: {voice_model}")
-                return [temp_file.name]
-            
-            return []
-                
-        except Exception as e:
-            print(f"❌ Google AI Studio旧音声エラー: {e}")
-            return []
-    
-    def _get_voice_style_prompt(self, voice_model):
-        """音声モデル別のスタイル指示"""
-        voice_styles = {
-            "Kore": "with a warm, professional female voice, ",
-            "Autonoe": "with a gentle, melodic female voice, ",
-            "Charon": "with a deep, mysterious male voice, ",
-            "Fenrir": "with a strong, confident male voice, ",
-            "Aoede": "with a musical, expressive female voice, ",
-            "Puck": "with a playful, energetic voice, ",
-            "Anthea": "with a sophisticated, elegant female voice, ",
-            "Urania": "with a clear, authoritative female voice, "
-        }
-        return voice_styles.get(voice_model, "with a natural, pleasant voice, ")
-    
-    async def _legacy_tts_synthesis(self, text, output_file, voice_model, speed):
-        """旧API風音声合成（システムTTSベース）"""
-        try:
-            system = platform.system()
-            
-            if system == "Windows":
-                # Windows用（音声モデル風調整）
-                voice_mapping = {
-                    "Kore": "Microsoft Haruka Desktop",
-                    "Autonoe": "Microsoft Ayumi Desktop", 
-                    "Charon": "Microsoft Ichiro Desktop",
-                    "Fenrir": "Microsoft Ichiro Desktop"
-                }
-                voice_name = voice_mapping.get(voice_model, "Microsoft Ayumi Desktop")
-                rate_value = max(-10, min(10, int((speed - 1.0) * 5)))
-                
-                ps_script = f'''
-Add-Type -AssemblyName System.speech
-$speak = New-Object System.Speech.Synthesis.SpeechSynthesizer
-try {{
-    $speak.SelectVoice("{voice_name}")
-    $speak.Rate = {rate_value}
-    $speak.SetOutputToWaveFile("{output_file}")
-    $speak.Speak("{text}")
-    $speak.Dispose()
-}} catch {{
-    $speak.Dispose()
-    exit 1
-}}
-'''
-                
-                process = await asyncio.create_subprocess_exec(
-                    "powershell", "-Command", ps_script,
-                    stdout=asyncio.subprocess.PIPE,
-                    stderr=asyncio.subprocess.PIPE
-                )
-                await process.wait()
-                return process.returncode == 0
-                
-            elif system == "Darwin":  # macOS
-                voice_mapping = {
-                    "Kore": "Kyoko",
-                    "Autonoe": "Kyoko",
-                    "Charon": "Otoya",
-                    "Fenrir": "Otoya"
-                }
-                voice_name = voice_mapping.get(voice_model, "Kyoko")
-                rate_value = max(100, min(500, int(200 * speed)))
-                
-                process = await asyncio.create_subprocess_exec(
-                    "say", "-v", voice_name, "-r", str(rate_value),
-                    "-o", output_file, "--data-format=LEI16@22050", text
-                )
-                await process.wait()
-                return process.returncode == 0
-            
-            return False
-            
-        except Exception as e:
-            print(f"旧API音声合成エラー: {e}")
-            return False
 
 # Avis Speech Engine API実装（完全版・変更なし）
 class AvisSpeechEngineAPI(VoiceEngineBase):
@@ -834,103 +677,6 @@ class VOICEVOXEngineAPI(VoiceEngineBase):
             
         except Exception as e:
             print(f"❌ VOICEVOX Engine合成エラー: {e}")
-            return []
-
-# Google Cloud TTS API実装（完全版・変更なし）
-class GoogleCloudTTSAPI(VoiceEngineBase):
-    """
-    Google Cloud Text-to-Speech API v2.2（完全版）
-    高品質音声合成・多言語対応・有料サービス
-    """
-    
-    def __init__(self):
-        self.max_length = 5000
-        self.base_url = "https://texttospeech.googleapis.com/v1"
-        self.voice_models = [
-            # 日本語音声（完全版）
-            "ja-JP-Standard-A", "ja-JP-Standard-B", "ja-JP-Standard-C", "ja-JP-Standard-D",
-            "ja-JP-Wavenet-A", "ja-JP-Wavenet-B", "ja-JP-Wavenet-C", "ja-JP-Wavenet-D",
-            "ja-JP-Neural2-B", "ja-JP-Neural2-C", "ja-JP-Neural2-D",
-            # 英語音声（完全版）
-            "en-US-Standard-A", "en-US-Standard-B", "en-US-Standard-C", "en-US-Standard-D",
-            "en-US-Wavenet-A", "en-US-Wavenet-B", "en-US-Wavenet-C", "en-US-Wavenet-D",
-            "en-US-Neural2-A", "en-US-Neural2-C", "en-US-Neural2-D", "en-US-Neural2-F"
-        ]
-    
-    def get_available_voices(self):
-        return self.voice_models
-    
-    def get_max_text_length(self):
-        return self.max_length
-    
-    def get_engine_info(self):
-        return {
-            "name": "Google Cloud TTS",
-            "cost": "月100万文字まで無料",
-            "quality": "★★★★★",
-            "description": "従来の最高品質・多言語・プロ向け・Neural2対応"
-        }
-    
-    async def synthesize_speech(self, text, voice_model="ja-JP-Wavenet-A", speed=1.0, api_key=None, **kwargs):
-        """
-        Google Cloud TTSを使用した音声合成（完全版）
-        """
-        try:
-            if not api_key:
-                print("❌ Google Cloud TTS APIキーが設定されていません")
-                return []
-            
-            # 音声設定（完全版）
-            voice_config = {
-                "languageCode": "ja-JP" if voice_model.startswith("ja-JP") else "en-US",
-                "name": voice_model
-            }
-            
-            audio_config = {
-                "audioEncoding": "MP3",
-                "speakingRate": speed,
-                "pitch": 0.0,
-                "volumeGainDb": 0.0,
-                "effectsProfileId": ["small-bluetooth-speaker-class-device"]
-            }
-            
-            request_body = {
-                "input": {"text": text},
-                "voice": voice_config,
-                "audioConfig": audio_config
-            }
-            
-            headers = {
-                "Authorization": f"Bearer {api_key}",
-                "Content-Type": "application/json"
-            }
-            
-            async with aiohttp.ClientSession() as session:
-                async with session.post(
-                    f"{self.base_url}/text:synthesize",
-                    headers=headers,
-                    json=request_body,
-                    timeout=30
-                ) as response:
-                    if response.status != 200:
-                        print(f"Google Cloud TTS エラー: {response.status}")
-                        return []
-                    
-                    response_data = await response.json()
-                    
-                    # 音声データのデコード
-                    audio_data = base64.b64decode(response_data['audioContent'])
-                    
-                    # 一時ファイルに保存
-                    temp_file = tempfile.NamedTemporaryFile(delete=False, suffix=".mp3")
-                    temp_file.write(audio_data)
-                    temp_file.close()
-                    
-                    print(f"✅ Google Cloud TTS音声合成成功: {voice_model}")
-                    return [temp_file.name]
-            
-        except Exception as e:
-            print(f"❌ Google Cloud TTS合成エラー: {e}")
             return []
 
 # システムTTS API（完全版・変更なし）
@@ -1328,13 +1074,11 @@ class VoiceEngineManager:
     """
     音声エンジン管理クラス v2.2 - 6エンジン完全統合版
     
-    優先順位（2025年5月最新版・完全版）:
+    優先順位（2025年5月最新版・修正版）:
     1. Google AI Studio新音声（2025年5月追加・最新技術）
     2. Avis Speech Engine（高品質・完全無料・ローカル）
     3. VOICEVOX Engine（定番キャラ・完全無料・ローカル）
-    4. Google Cloud TTS（従来の最高品質・有料）
-    5. Google AI Studio旧音声（互換性維持）
-    6. システムTTS（OS標準・フォールバック）
+    4. システムTTS（OS標準・フォールバック）
     """
     
     def __init__(self):
@@ -1342,14 +1086,12 @@ class VoiceEngineManager:
             "google_ai_studio_new": GoogleAIStudioNewVoiceAPI(),
             "avis_speech": AvisSpeechEngineAPI(),
             "voicevox": VOICEVOXEngineAPI(),
-            "google_cloud_tts": GoogleCloudTTSAPI(),
-            "google_ai_studio_legacy": GoogleAIStudioLegacyVoiceAPI(),
             "system_tts": SystemTTSAPI()
         }
         self.current_engine = "google_ai_studio_new"  # デフォルトは最新
         self.priority = [
-            "google_ai_studio_new", "avis_speech", "voicevox", 
-            "google_cloud_tts", "google_ai_studio_legacy", "system_tts"
+            "google_ai_studio_new", "avis_speech", "voicevox",
+            "system_tts"
         ]
     
     def set_engine(self, engine_name):
@@ -1618,8 +1360,8 @@ class CharacterManager:
                     "emotion_level": "上品で控えめ"
                 },
                 "voice_settings": {
-                    "engine": "google_cloud_tts",
-                    "model": "ja-JP-Wavenet-A",
+                    "engine": "google_ai_studio_new",
+                    "model": "puck", # Or another suitable model from GoogleAIStudioNewVoiceAPI
                     "speed": 1.0
                 }
             },
@@ -1639,24 +1381,6 @@ class CharacterManager:
                     "engine": "google_ai_studio_new",
                     "model": "puck", # Updated model name to a supported one
                     "speed": 1.0
-                }
-            },
-            "レトロ互換系": {
-                "personality": {
-                    "base_tone": "クラシックで安定感のある、伝統的な価値観、温故知新",
-                    "speech_style": "落ち着いた口調、伝統的な表現、安定感のある話し方",
-                    "character_traits": ["伝統重視", "安定志向", "温故知新", "クラシック好み", "継続性重視"],
-                    "favorite_topics": ["伝統文化", "歴史", "クラシック音楽", "古典文学", "職人技", "継承"]
-                },
-                "response_settings": {
-                    "max_length": "2文程度",
-                    "use_emojis": False,
-                    "emotion_level": "落ち着いて安定"
-                },
-                "voice_settings": {
-                    "engine": "google_ai_studio_legacy",
-                    "model": "Kore",
-                    "speed": 0.9
                 }
             }
         }
@@ -1765,7 +1489,7 @@ class CharacterEditDialog:
         # ダイアログウィンドウ作成
         self.dialog = tk.Toplevel(parent)
         title = "キャラクター編集" if self.is_edit_mode else "キャラクター作成"
-        self.dialog.title(title + " - 6エンジン対応版")
+        self.dialog.title(title + " - 4エンジン対応版")
         self.dialog.geometry("650x800")
         self.dialog.transient(parent)
         self.dialog.grab_set()
@@ -1793,11 +1517,11 @@ class CharacterEditDialog:
         
         # テンプレート選択（新規作成時のみ）
         if not self.is_edit_mode:
-            template_frame = ttk.LabelFrame(self.dialog, text="テンプレート選択（6エンジン対応）", padding="10")
+            template_frame = ttk.LabelFrame(self.dialog, text="テンプレート選択（4エンジン対応）", padding="10")
             template_frame.pack(fill=tk.X, padx=10, pady=10)
             
             self.template_var = tk.StringVar(value="最新AI系")
-            templates = ["最新AI系", "元気系", "知的系", "癒し系", "ずんだもん系", "キャラクター系", "プロ品質系", "多言語対応系", "レトロ互換系", "カスタム"]
+            templates = ["最新AI系", "元気系", "知的系", "癒し系", "ずんだもん系", "キャラクター系", "プロ品質系", "多言語対応系", "カスタム"]
             
             # テンプレートを2列で配置
             template_grid = ttk.Frame(template_frame)
@@ -1829,15 +1553,15 @@ class CharacterEditDialog:
         self.topics_text = tk.Text(personality_frame, height=4, width=60)
         self.topics_text.pack(fill=tk.X, pady=2)
         
-        # 音声設定（6エンジン完全対応）
-        voice_frame = ttk.LabelFrame(self.dialog, text="音声設定（6エンジン完全対応）", padding="10")
+        # 音声設定（4エンジン完全対応）
+        voice_frame = ttk.LabelFrame(self.dialog, text="音声設定（4エンジン完全対応）", padding="10")
         voice_frame.pack(fill=tk.X, padx=10, pady=10)
         
         # 音声エンジン選択
         ttk.Label(voice_frame, text="音声エンジン:").pack(anchor=tk.W)
         self.voice_engine_var = tk.StringVar(value="google_ai_studio_new")
         engine_combo = ttk.Combobox(voice_frame, textvariable=self.voice_engine_var,
-                                   values=["google_ai_studio_new", "avis_speech", "voicevox", "google_cloud_tts", "google_ai_studio_legacy", "system_tts"], 
+                                   values=["google_ai_studio_new", "avis_speech", "voicevox", "system_tts"],
                                    state="readonly", width=50)
         engine_combo.pack(fill=tk.X, pady=2)
         engine_combo.bind('<<ComboboxSelected>>', self.on_engine_changed)
@@ -2030,18 +1754,6 @@ class CharacterEditDialog:
             ]
             default_voice = "ずんだもん(ノーマル)"
             info_text = "🎤 定番キャラクター・ずんだもん等・安定動作・豊富な感情表現"
-        elif engine == "google_cloud_tts":
-            voices = [
-                "ja-JP-Wavenet-A", "ja-JP-Wavenet-B", "ja-JP-Wavenet-C", "ja-JP-Wavenet-D",
-                "ja-JP-Neural2-B", "ja-JP-Neural2-C", "ja-JP-Neural2-D", "ja-JP-Standard-A",
-                "en-US-Wavenet-A", "en-US-Neural2-A", "en-US-Neural2-C"
-            ]
-            default_voice = "ja-JP-Wavenet-A"
-            info_text = "⭐ 従来の最高品質・Google Cloud・月100万文字まで無料・Neural2対応"
-        elif engine == "google_ai_studio_legacy":
-            voices = ["Kore", "Autonoe", "Charon", "Fenrir", "Aoede", "Puck", "Anthea", "Urania", "Neptune", "Callisto"]
-            default_voice = "Kore"
-            info_text = "🔄 旧Google AI Studio・互換性維持・安定動作・クラシック音声"
         else:  # system_tts
             system_tts = SystemTTSAPI()
             voices = system_tts.get_available_voices()
@@ -2087,18 +1799,6 @@ class CharacterEditDialog:
                     audio_files = loop.run_until_complete(
                         engine.synthesize_speech(text, voice_model, speed)
                     )
-                elif voice_engine == "google_cloud_tts":
-                    api_key = self._get_api_key("google_cloud_api_key")
-                    engine = GoogleCloudTTSAPI()
-                    audio_files = loop.run_until_complete(
-                        engine.synthesize_speech(text, voice_model, speed, api_key=api_key)
-                    )
-                elif voice_engine == "google_ai_studio_legacy":
-                    api_key = self._get_api_key("google_ai_api_key")
-                    engine = GoogleAIStudioLegacyVoiceAPI()
-                    audio_files = loop.run_until_complete(
-                        engine.synthesize_speech(text, voice_model, speed, api_key=api_key)
-                    )
                 else:  # system_tts
                     engine = SystemTTSAPI()
                     audio_files = loop.run_until_complete(
@@ -2131,13 +1831,11 @@ class CharacterEditDialog:
                     ("google_ai_studio_new", "puck"), # 修正: 短い形式の音声名に変更 (例: "puck")
                     ("avis_speech", "Anneli(ノーマル)"),
                     ("voicevox", "ずんだもん(ノーマル)"),
-                    ("google_cloud_tts", "ja-JP-Wavenet-A"),
-                    ("google_ai_studio_legacy", "Kore"),
                     ("system_tts", "Microsoft Ayumi Desktop")
                 ]
                 
                 for i, (engine_name, voice_model) in enumerate(engines_to_test, 1):
-                    print(f"🎵 エンジン比較 {i}/6: {engine_name}")
+                    print(f"🎵 エンジン比較 {i}/{len(engines_to_test)}: {engine_name}")
                     
                     loop = asyncio.new_event_loop()
                     asyncio.set_event_loop(loop)
@@ -2161,18 +1859,6 @@ class CharacterEditDialog:
                             engine = VOICEVOXEngineAPI()
                             audio_files = loop.run_until_complete(
                                 engine.synthesize_speech(test_text, voice_model, 1.0)
-                            )
-                        elif engine_name == "google_cloud_tts":
-                            api_key = self._get_api_key("google_cloud_api_key")
-                            engine = GoogleCloudTTSAPI()
-                            audio_files = loop.run_until_complete(
-                                engine.synthesize_speech(test_text, voice_model, 1.0, api_key=api_key)
-                            )
-                        elif engine_name == "google_ai_studio_legacy":
-                            api_key = self._get_api_key("google_ai_api_key")
-                            engine = GoogleAIStudioLegacyVoiceAPI()
-                            audio_files = loop.run_until_complete(
-                                engine.synthesize_speech(test_text, voice_model, 1.0, api_key=api_key)
                             )
                         else:  # system_tts
                             engine = SystemTTSAPI()
@@ -2288,13 +1974,13 @@ class CharacterEditDialog:
 # メインGUIアプリケーション v2.2（6エンジン完全対応版・機能削減なし）
 class AITuberMainGUI:
     """
-    完全版AITuberシステムGUI v2.2 - 6エンジン完全対応版
+    完全版AITuberシステムGUI v2.2 - 4エンジン完全対応版
     キャラクター管理・配信・デバッグ機能を完全統合（機能削減なし）
     """
     
     def __init__(self):
         self.root = tk.Tk()
-        self.root.title("AITuber完全版システム v2.2 - 6エンジン完全対応版（2025年5月最新・機能削減なし）")
+        self.root.title("AITuber完全版システム v2.2 - 4エンジン完全対応版（2025年5月最新・機能削減なし）")
         self.root.geometry("1100x950")
         
         # システム初期化
@@ -2357,7 +2043,7 @@ class AITuberMainGUI:
         
         # 費用情報（完全版）
         cost_info = ttk.Label(status_frame, 
-                             text="💰 v2.2完全版: 6エンジン完全統合（Google AI Studio新音声＋Avis Speech＋VOICEVOX＋Google Cloud TTS＋旧AI Studio＋システムTTS）", 
+                             text="💰 v2.2完全版: 4エンジン完全統合（Google AI Studio新音声＋Avis Speech＋VOICEVOX＋システムTTS）",
                              foreground="green", wraplength=800)
         cost_info.pack(anchor=tk.W)
         
@@ -2550,9 +2236,8 @@ class AITuberMainGUI:
 🌸 癒し系: ふんわり・穏やか・聞き上手・母性的 【Avis Speech: Anneli(ささやき)】
 🎭 ずんだもん系: 「〜のだ」語尾・親しみやすい・東北弁・愛されキャラ 【VOICEVOX: ずんだもん(ノーマル)】
 🎪 キャラクター系: アニメ調・個性的・エンターテイナー・表現豊か 【VOICEVOX: 四国めたん(ノーマル)】
-⭐ プロ品質系: プロフェッショナル・上品・洗練・エレガント 【Google Cloud TTS: ja-JP-Wavenet-A】
+⭐ プロ品質系: プロフェッショナル・上品・洗練・エレガント 【Google AI Studio新音声: puck】
 🌍 多言語対応系: 国際的・グローバル・多文化理解・文化架け橋 【Google AI Studio新音声: Nova】
-🔄 レトロ互換系: クラシック・安定感・伝統重視・温故知新 【Google AI Studio旧音声: Kore】
 🛠️ カスタム: 自由設定・完全カスタマイズ・オリジナル
         """
         
@@ -2566,7 +2251,7 @@ class AITuberMainGUI:
         self.notebook.add(debug_frame, text="🔧 デバッグ")
         
         # 音声エンジンテスト（完全版）
-        engine_test_frame = ttk.LabelFrame(debug_frame, text="音声エンジンテスト v2.2（6エンジン完全対応）", padding="10")
+        engine_test_frame = ttk.LabelFrame(debug_frame, text="音声エンジンテスト v2.2（4エンジン完全対応）", padding="10")
         engine_test_frame.pack(fill=tk.X, padx=10, pady=5)
         
         # エンジン選択
@@ -2576,7 +2261,7 @@ class AITuberMainGUI:
         ttk.Label(engine_select_frame, text="テストエンジン:").pack(side=tk.LEFT)
         self.test_engine_var = tk.StringVar(value="google_ai_studio_new")
         engine_test_combo = ttk.Combobox(engine_select_frame, textvariable=self.test_engine_var,
-                                        values=["google_ai_studio_new", "avis_speech", "voicevox", "google_cloud_tts", "google_ai_studio_legacy", "system_tts"], 
+                                        values=["google_ai_studio_new", "avis_speech", "voicevox", "system_tts"],
                                         state="readonly", width=25)
         engine_test_combo.pack(side=tk.LEFT, padx=10)
         
@@ -2604,7 +2289,7 @@ class AITuberMainGUI:
         
         ttk.Label(text_frame, text="テストテキスト:").pack(anchor=tk.W)
         self.test_text_var = tk.StringVar(
-            value="こんにちは！6つの音声エンジンを完全統合したAITuberシステムv2.2のテストです。2025年5月最新技術に完全対応しています！"
+            value="こんにちは！4つの音声エンジンを完全統合したAITuberシステムv2.2のテストです。2025年5月最新技術に完全対応しています！"
         )
         test_text_entry = ttk.Entry(text_frame, textvariable=self.test_text_var, width=100)
         test_text_entry.pack(fill=tk.X, pady=5)
@@ -2633,8 +2318,6 @@ class AITuberMainGUI:
         
         ttk.Button(api_buttons, text="🤖 Google AI Studio", 
                   command=self.test_google_ai_studio).pack(side=tk.LEFT, padx=5)
-        ttk.Button(api_buttons, text="☁️ Google Cloud TTS", 
-                  command=self.test_google_cloud_tts).pack(side=tk.LEFT, padx=5)
         ttk.Button(api_buttons, text="📺 YouTube API", 
                   command=self.test_youtube_api).pack(side=tk.LEFT, padx=5)
         ttk.Button(api_buttons, text="🎙️ Avis Speech", 
@@ -2643,7 +2326,7 @@ class AITuberMainGUI:
                   command=self.test_voicevox).pack(side=tk.LEFT, padx=5)
         
         # 対話テスト（完全版）
-        chat_test_frame = ttk.LabelFrame(debug_frame, text="AI対話テスト（Gemini文章生成＋6エンジン音声合成）", padding="10")
+        chat_test_frame = ttk.LabelFrame(debug_frame, text="AI対話テスト（Gemini文章生成＋4エンジン音声合成）", padding="10")
         chat_test_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=5)
         
         # 対話制御
@@ -2684,12 +2367,12 @@ class AITuberMainGUI:
                   command=self.send_random_message).pack(side=tk.RIGHT, padx=5)
     
     def create_settings_tab(self):
-        """設定タブ（6エンジン完全対応版）"""
+        """設定タブ（4エンジン完全対応版）"""
         settings_frame = ttk.Frame(self.notebook)
         self.notebook.add(settings_frame, text="⚙️ 設定")
         
-        # API設定（6エンジン完全対応）
-        api_frame = ttk.LabelFrame(settings_frame, text="API設定 v2.2（6エンジン完全対応）", padding="10")
+        # API設定（4エンジン完全対応）
+        api_frame = ttk.LabelFrame(settings_frame, text="API設定 v2.2（4エンジン完全対応）", padding="10")
         api_frame.pack(fill=tk.X, padx=10, pady=5)
         
         api_grid = ttk.Frame(api_frame)
@@ -2702,22 +2385,15 @@ class AITuberMainGUI:
         ai_entry.grid(row=0, column=1, padx=10, pady=2)
         ttk.Button(api_grid, text="テスト", command=self.test_google_ai_studio).grid(row=0, column=2, padx=5)
         
-        # Google Cloud TTS APIキー
-        ttk.Label(api_grid, text="Google Cloud TTS APIキー（従来高品質音声・オプション）:").grid(row=1, column=0, sticky=tk.W, pady=2)
-        self.google_cloud_var = tk.StringVar()
-        cloud_entry = ttk.Entry(api_grid, textvariable=self.google_cloud_var, width=50, show="*")
-        cloud_entry.grid(row=1, column=1, padx=10, pady=2)
-        ttk.Button(api_grid, text="テスト", command=self.test_google_cloud_tts).grid(row=1, column=2, padx=5)
-        
         # YouTube APIキー
-        ttk.Label(api_grid, text="YouTube APIキー（配信用）:").grid(row=2, column=0, sticky=tk.W, pady=2)
+        ttk.Label(api_grid, text="YouTube APIキー（配信用）:").grid(row=1, column=0, sticky=tk.W, pady=2)
         self.youtube_api_var = tk.StringVar()
         youtube_entry = ttk.Entry(api_grid, textvariable=self.youtube_api_var, width=50, show="*")
-        youtube_entry.grid(row=2, column=1, padx=10, pady=2)
-        ttk.Button(api_grid, text="テスト", command=self.test_youtube_api).grid(row=2, column=2, padx=5)
+        youtube_entry.grid(row=1, column=1, padx=10, pady=2)
+        ttk.Button(api_grid, text="テスト", command=self.test_youtube_api).grid(row=1, column=2, padx=5)
         
-        # 音声エンジン設定（6エンジン完全対応）
-        voice_frame = ttk.LabelFrame(settings_frame, text="音声エンジン設定（6エンジン完全対応）", padding="10")
+        # 音声エンジン設定（4エンジン完全対応）
+        voice_frame = ttk.LabelFrame(settings_frame, text="音声エンジン設定（4エンジン完全対応）", padding="10")
         voice_frame.pack(fill=tk.X, padx=10, pady=5)
         
         voice_grid = ttk.Frame(voice_frame)
@@ -2726,7 +2402,7 @@ class AITuberMainGUI:
         ttk.Label(voice_grid, text="デフォルト音声エンジン:").grid(row=0, column=0, sticky=tk.W)
         self.voice_engine_var = tk.StringVar()
         engine_combo = ttk.Combobox(voice_grid, textvariable=self.voice_engine_var,
-                    values=["google_ai_studio_new", "avis_speech", "voicevox", "google_cloud_tts", "google_ai_studio_legacy", "system_tts"], 
+                    values=["google_ai_studio_new", "avis_speech", "voicevox", "system_tts"],
                     state="readonly", width=25)
         engine_combo.grid(row=0, column=1, padx=10)
         engine_combo.bind('<<ComboboxSelected>>', self.on_system_engine_changed)
@@ -2811,8 +2487,8 @@ class AITuberMainGUI:
         ttk.Button(save_frame, text="📥 設定をインポート", 
                   command=self.import_settings).pack(side=tk.LEFT, padx=5)
         
-        # ヘルプ・ガイド（6エンジン完全対応）
-        help_frame = ttk.LabelFrame(settings_frame, text="エンジン起動ガイド v2.2（6エンジン完全対応）", padding="10")
+        # ヘルプ・ガイド（4エンジン完全対応）
+        help_frame = ttk.LabelFrame(settings_frame, text="エンジン起動ガイド v2.2（4エンジン完全対応）", padding="10")
         help_frame.pack(fill=tk.X, padx=10, pady=5)
         
         # 音声エンジンの使い分けガイド
@@ -2839,16 +2515,6 @@ class AITuberMainGUI:
 確認: http://127.0.0.1:50021/docs
 特徴: ずんだもん・四国めたん等の人気キャラクター音声
 
-⭐ 【Google Cloud TTS】- クラウドAPI
-設定: Google Cloud Console でサービスアカウントキーを作成・設定
-品質: 従来の最高品質・月100万文字まで無料・Neural2対応
-特徴: Wavenet, Neural2等のプロ品質音声
-
-🔄 【Google AI Studio旧音声】- 互換性維持
-設定: Google AI Studio APIキーを設定（旧API使用）
-品質: 従来版・互換性維持・安定動作・クラシック音声
-特徴: Kore, Autonoe, Charon等の従来音声モデル
-
 💻 【システムTTS】- OS標準
 設定: 不要（Windows/macOS/Linuxの標準機能を自動利用）
 特徴: 完全無料・オフライン・安定動作
@@ -2870,8 +2536,6 @@ class AITuberMainGUI:
                   command=lambda: webbrowser.open("https://github.com/Aivis-Project/AivisSpeech-Engine")).pack(side=tk.LEFT, padx=5)
         ttk.Button(link_frame, text="🎤 VOICEVOX", 
                   command=lambda: webbrowser.open("https://github.com/VOICEVOX/voicevox_engine")).pack(side=tk.LEFT, padx=5)
-        ttk.Button(link_frame, text="☁️ Google Cloud", 
-                  command=lambda: webbrowser.open("https://cloud.google.com/text-to-speech")).pack(side=tk.LEFT, padx=5)
     
     def create_advanced_tab(self):
         """高度な機能タブ（新規追加）"""
@@ -2912,7 +2576,7 @@ class AITuberMainGUI:
         self.status_bar.pack(fill=tk.X, side=tk.BOTTOM)
         
         # 左側：基本状態
-        self.status_label = ttk.Label(self.status_bar, text="✅ 準備完了 - v2.2（6エンジン完全対応版・2025年5月最新・機能削減なし）")
+        self.status_label = ttk.Label(self.status_bar, text="✅ 準備完了 - v2.2（4エンジン完全対応版・2025年5月最新・機能削減なし）")
         self.status_label.pack(side=tk.LEFT, padx=10)
         
         # 中央：キャラクター状態
@@ -2972,7 +2636,6 @@ class AITuberMainGUI:
         """設定をGUIに読み込み"""
         # API設定
         self.google_ai_var.set(self.config.get_system_setting("google_ai_api_key", ""))
-        self.google_cloud_var.set(self.config.get_system_setting("google_cloud_api_key", ""))
         self.youtube_api_var.set(self.config.get_system_setting("youtube_api_key", ""))
         self.voice_engine_var.set(self.config.get_system_setting("voice_engine", "avis_speech"))
         
@@ -3002,7 +2665,6 @@ class AITuberMainGUI:
         try:
             # API設定
             self.config.set_system_setting("google_ai_api_key", self.google_ai_var.get())
-            self.config.set_system_setting("google_cloud_api_key", self.google_cloud_var.get())
             self.config.set_system_setting("youtube_api_key", self.youtube_api_var.get())
             self.config.set_system_setting("voice_engine", self.voice_engine_var.get())
             self.config.set_system_setting("auto_save", self.auto_save_var.get())
@@ -3249,14 +2911,14 @@ class AITuberMainGUI:
                                   "音声テストを行うには、まずキャラクターを選択してください。")
             return
         
-        text = self.test_text_var.get()
-        if not text:
+        text_to_test = self.test_text_var.get()
+        if not text_to_test: # 変数名を text から text_to_test に変更
             messagebox.showwarning("テキスト未入力", "音声テストを行うテキストを入力してください。")
             return
         
         # 非同期で音声テスト実行
-        self.log(f"🎤 音声テスト開始: {text}")
-        threading.Thread(target=self._run_voice_test, args=(text,), daemon=True).start()
+        self.log(f"🎤 音声テスト開始: {text_to_test}") # 変数名を text から text_to_test に変更
+        threading.Thread(target=self._run_voice_test, args=(text_to_test,), daemon=True).start() # 変数名を text から text_to_test に変更
     
     def _run_voice_test(self, text):
         """音声テストの実行 v2.1（完全版）"""
@@ -3288,14 +2950,11 @@ class AITuberMainGUI:
             
             # API KEY取得
             google_ai_api_key = self.config.get_system_setting("google_ai_api_key")
-            google_cloud_api_key = self.config.get_system_setting("google_cloud_api_key")
 
             # 優先エンジンに応じて適切なAPIキーを選択
             api_key_to_use = None
             if "google_ai_studio" in voice_engine:
                 api_key_to_use = google_ai_api_key
-            elif voice_engine == "google_cloud_tts":
-                api_key_to_use = google_cloud_api_key
             
             # フォールバック機能付き音声合成
             audio_files = loop.run_until_complete(
@@ -3339,8 +2998,7 @@ class AITuberMainGUI:
         try:
             self.log("🔄 音声エンジン比較テスト開始...")
             
-            engines_to_test = ["avis_speech", "voicevox", "google_cloud_tts", "system_tts"]
-            google_cloud_api_key = self.config.get_system_setting("google_cloud_api_key")
+            engines_to_test = ["avis_speech", "voicevox", "system_tts"]
             
             for i, engine_name in enumerate(engines_to_test, 1):
                 self.log(f"🎵 テスト {i}/{len(engines_to_test)}: {engine_name}")
@@ -3358,8 +3016,6 @@ class AITuberMainGUI:
                     api_key_to_use = None
                     if "google_ai_studio" in engine_name: # google_ai_studio_new と google_ai_studio_legacy
                         api_key_to_use = self.config.get_system_setting("google_ai_api_key")
-                    elif engine_name == "google_cloud_tts":
-                        api_key_to_use = google_cloud_api_key # これはループ外で取得済み
 
                     if api_key_to_use:
                         audio_files = loop.run_until_complete(
@@ -3410,12 +3066,10 @@ class AITuberMainGUI:
             loop = asyncio.new_event_loop()
             asyncio.set_event_loop(loop)
             
-            google_cloud_api_key = self.config.get_system_setting("google_cloud_api_key")
-            
             # 故意に存在しないエンジンから開始してフォールバックをテスト
             audio_files = loop.run_until_complete(
                 self.voice_manager.synthesize_with_fallback(
-                    text, "default", 1.0, preferred_engine="nonexistent_engine", api_key=google_cloud_api_key
+                    text, "default", 1.0, preferred_engine="nonexistent_engine", api_key=self.config.get_system_setting("google_ai_api_key")
                 )
             )
             
@@ -3536,14 +3190,11 @@ class AITuberMainGUI:
             
             # API KEY取得（音声合成用）
             google_ai_api_key = self.config.get_system_setting("google_ai_api_key")
-            google_cloud_api_key = self.config.get_system_setting("google_cloud_api_key")
 
             # 優先エンジンに応じて適切なAPIキーを選択
             api_key_to_use = None
             if "google_ai_studio" in voice_engine: # google_ai_studio_new または google_ai_studio_legacy
                 api_key_to_use = google_ai_api_key
-            elif voice_engine == "google_cloud_tts":
-                api_key_to_use = google_cloud_api_key
             
             # フォールバック機能付き音声合成
             audio_files = loop.run_until_complete(
@@ -3662,24 +3313,21 @@ class AITuberMainGUI:
 3. 「デバッグ」で音声テスト・エンジン状態確認
 4. 「メイン」でYouTube配信開始
 
-【5つの音声エンジン（修正版）】
+【4つの音声エンジン（修正版）】
+🚀 Google AI Studio新音声: 最新技術・リアルタイム対応 (Google AI Studio APIキー設定)
 🎙️ Avis Speech Engine: ローカル実行・高品質（ポート10101）
 🎤 VOICEVOX Engine: 定番キャラ・ずんだもん等（ポート50021）
-⭐ Google Cloud TTS: 最高品質・月100万文字まで無料
 💻 システムTTS: OS標準・フォールバック用
-🤖 Google AI Studio: 文章生成専用（Gemini 2.5 Flash）
 
 【推奨設定】
 • まずは「元気系」「ずんだもん系」キャラクターから開始
-• 音声エンジンは「avis_speech」または「voicevox」推奨
-• 高品質が必要な場合は「google_cloud_tts」を使用
+• 音声エンジンは「google_ai_studio_new」、「avis_speech」、「voicevox」推奨
 • 問題があれば自動で次のエンジンにフォールバック
 
 【エンジン起動確認】
+• Google AI Studio新音声: Google AI Studio APIキー設定
 • Avis Speech: http://127.0.0.1:10101/docs
 • VOICEVOX: http://127.0.0.1:50021/docs
-• Google Cloud TTS: APIキー設定のみ
-• Google AI Studio: APIキー設定のみ
 • システムTTS: 設定不要
 
 【トラブルシューティング】
@@ -4186,65 +3834,6 @@ class AITuberMainGUI:
             import traceback
             self.log(f"詳細トレース: {traceback.format_exc()}")
             messagebox.showerror("テストエラー", f"Google AI Studio 新音声合成テスト中にエラーが発生しました: {e}")
-        finally:
-            if loop:
-                try:
-                    loop.close()
-                except Exception as e:
-                    self.log(f"⚠️ イベントループクローズエラー: {e}")
-
-
-    def test_google_cloud_tts(self):
-        """Google Cloud TTSの音声合成機能をテスト"""
-        if not self.config.get_system_setting("google_cloud_api_key"):
-            messagebox.showwarning("APIキー未設定", "Google Cloud TTS APIキーを設定してください")
-            return
-        
-        # テスト用のテキスト
-        test_text = "こんにちは、これはGoogle Cloud TTSの音声合成テストです。"
-        
-        self.log(f"🔊 Google Cloud TTS 音声合成テスト開始: {test_text}")
-        
-        # 非同期で音声合成実行
-        threading.Thread(target=self._run_google_cloud_tts_test, args=(test_text,), daemon=True).start()
-
-    def _run_google_cloud_tts_test(self, text_to_synthesize, voice_model="ja-JP-Wavenet-A", speed=1.0):
-        """Google Cloud TTS の音声合成をテストする内部メソッド"""
-        self.log(f"🧪 Google Cloud TTS 音声合成テスト開始: Voice: {voice_model}, Speed: {speed}, Text: {text_to_synthesize}")
-        api_key = self.config.get_system_setting("google_cloud_api_key")
-        if not api_key:
-            self.log("❌ Google Cloud TTS APIキーが設定されていません。")
-            messagebox.showerror("APIキーエラー", "Google Cloud TTS APIキーが設定されていません。")
-            return
-
-        loop = None
-        try:
-            loop = asyncio.new_event_loop()
-            asyncio.set_event_loop(loop)
-
-            engine = GoogleCloudTTSAPI()
-            # GoogleCloudTTSAPI の synthesize_speech は api_key をキーワード引数として受け取ります
-            audio_files = loop.run_until_complete(
-                engine.synthesize_speech(text_to_synthesize, voice_model, speed, api_key=api_key)
-            )
-
-            if audio_files:
-                self.log(f"✅ 音声ファイル生成成功: {audio_files}")
-                audio_player = AudioPlayer()
-                loop.run_until_complete(
-                    audio_player.play_audio_files(audio_files)
-                )
-                self.log("🎧 音声再生完了")
-                messagebox.showinfo("音声テスト成功", f"Google Cloud TTS ({voice_model}) のテスト再生が完了しました。")
-            else:
-                self.log("❌ 音声ファイルの生成に失敗しました。")
-                messagebox.showerror("音声テスト失敗", f"Google Cloud TTS ({voice_model}) で音声ファイルの生成に失敗しました。詳細はログを確認してください。")
-
-        except Exception as e:
-            self.log(f"❌ Google Cloud TTS テスト中にエラーが発生しました: {e}")
-            import traceback
-            self.log(f"詳細トレース: {traceback.format_exc()}")
-            messagebox.showerror("テストエラー", f"Google Cloud TTS テスト中にエラーが発生しました: {e}")
         finally:
             if loop:
                 try:
@@ -4840,11 +4429,11 @@ class AITuberStreamingSystem:
             speed = voice_settings.get('speed', 1.0)
             
             # API KEY取得（音声合成用）
-            google_cloud_api_key = self.config.get_system_setting("google_cloud_api_key")
+            google_ai_api_key = self.config.get_system_setting("google_ai_api_key")
             
             # フォールバック機能付き音声合成
             audio_files = await self.voice_manager.synthesize_with_fallback(
-                text, voice_model, speed, preferred_engine=voice_engine, api_key=google_cloud_api_key
+                text, voice_model, speed, preferred_engine=voice_engine, api_key=google_ai_api_key
             )
             
             if audio_files:
