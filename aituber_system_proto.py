@@ -2151,7 +2151,7 @@ class AITuberMainGUI:
         ttk.Button(char_control_frame, text="🔄 更新", 
                   command=self.refresh_character_list).pack(side=tk.LEFT, padx=5)
         ttk.Button(char_control_frame, text="⚙️ 設定", 
-                  command=self.quick_character_settings).pack(side=tk.LEFT, padx=5)
+                  command=self.open_selected_character_editor).pack(side=tk.LEFT, padx=5)
         
         # 配信制御（完全版）
         stream_frame = ttk.LabelFrame(main_frame, text="配信制御", padding="10")
@@ -2671,30 +2671,48 @@ class AITuberMainGUI:
         # ステータス更新を定期実行
         self.update_system_info()
     
-    def quick_character_settings(self):
-        """クイックキャラクター設定（完全版）"""
-        quick_frame = ttk.Frame(self.notebook)
-        self.notebook.add(quick_frame, text="⚡ クイック設定")
-        
-        # キャラクター選択
-        ttk.Label(quick_frame, text="キャラクター選択:").pack(anchor=tk.W, padx=10, pady=5)
-        self.character_combo = ttk.Combobox(quick_frame, state="readonly", width=50)
-        self.character_combo.pack(padx=10, pady=5)
-        
-        # キャラクター選択時の処理
-        self.character_combo.bind('<<ComboboxSelected>>', self.on_character_selected)
-        
-        # キャラクター情報表示
-        self.char_info_label = ttk.Label(quick_frame, text="キャラクター情報: 未選択", wraplength=500)
-        self.char_info_label.pack(padx=10, pady=5)
-        
-        # キャラクター操作ボタン
-        button_frame = ttk.Frame(quick_frame)
-        button_frame.pack(fill=tk.X, padx=10, pady=5)
-        
-        ttk.Button(button_frame, text="📝 設定変更", command=self.open_character_settings).pack(side=tk.LEFT, padx=5)
-        ttk.Button(button_frame, text="🎤 音声テスト", command=self.test_character_voice).pack(side=tk.LEFT, padx=5)
+    # quick_character_settings メソッドと open_quick_edit_dialog メソッドを削除
 
+    def open_selected_character_editor(self):
+        """メインタブで選択されているキャラクターの編集ダイアログを開く"""
+        selection = self.character_var.get() # メインタブのキャラクター選択コンボボックスの値
+
+        if not selection:
+            messagebox.showwarning("キャラクター未選択", "編集するキャラクターをメインタブで選択してください。")
+            self.log("⚠️キャラクター編集: キャラクターが選択されていません。")
+            return
+
+        try:
+            # "キャラクター名 (ID)" の形式からIDを抽出
+            if '(' in selection and ')' in selection:
+                char_id = selection.split('(')[-1].replace(')', '')
+            else:
+                self.log(f"❌ キャラクター編集: 選択形式エラー '{selection}'。キャラクター名 (ID) 形式を期待します。")
+                messagebox.showerror("選択エラー", f"キャラクターの選択形式が無効です: {selection}")
+                return
+
+            char_data = self.config.get_character(char_id)
+            if not char_data:
+                self.log(f"❌ キャラクター編集: キャラクターデータが見つかりません (ID: {char_id})。")
+                messagebox.showerror("エラー", f"キャラクターデータ (ID: {char_id}) が見つかりません。")
+                return
+
+            self.log(f"✏️ キャラクター編集開始: {char_data.get('name', 'Unknown')} (ID: {char_id})")
+            dialog = CharacterEditDialog(self.root, self.character_manager, char_id, char_data)
+            if dialog.result:
+                self.refresh_character_list() # キャラクターリストを更新
+                # メインタブのコンボボックスの表示も更新する必要があるか確認
+                # 名前が変更された場合、コンボボックスの表示も追従させると親切
+                new_name = dialog.result['name']
+                new_char_id = dialog.result['char_id']
+                self.character_var.set(f"{new_name} ({new_char_id})") # 表示を更新
+                self.on_character_changed() # ステータスバーなども更新
+                self.log(f"✅ キャラクター編集完了: {new_name}")
+        except Exception as e:
+            self.log(f"❌ キャラクター編集ダイアログ表示エラー: {e}")
+            import traceback
+            self.log(f"詳細トレース: {traceback.format_exc()}")
+            messagebox.showerror("編集エラー", f"キャラクター編集ダイアログの表示中にエラーが発生しました: {e}")
 
     def update_system_info(self):
         """システム情報の定期更新"""
