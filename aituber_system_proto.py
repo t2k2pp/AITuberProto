@@ -1069,10 +1069,10 @@ $mediaPlayer.Close()
         except Exception as e:
             print(f"Linux音声再生エラー: {e}")
 
-# 音声エンジン管理クラス v2.2（6エンジン完全対応版）
+# 音声エンジン管理クラス v2.2（4エンジン完全対応版）
 class VoiceEngineManager:
     """
-    音声エンジン管理クラス v2.2 - 6エンジン完全統合版
+    音声エンジン管理クラス v2.2 - 4エンジン完全統合版
     
     優先順位（2025年5月最新版・修正版）:
     1. Google AI Studio新音声（2025年5月追加・最新技術）
@@ -1131,7 +1131,7 @@ class VoiceEngineManager:
     
     async def synthesize_with_fallback(self, text, voice_model, speed=1.0, preferred_engine=None, api_key=None):
         """
-        フォールバック機能付き音声合成 v2.2（6エンジン完全対応版）
+        フォールバック機能付き音声合成 v2.2（4エンジン完全対応版）
         指定されたエンジンが失敗した場合、自動的に次のエンジンを試行
         """
         engines_to_try = []
@@ -1156,7 +1156,7 @@ class VoiceEngineManager:
                         continue
                 
                 # API KEYを渡す（完全対応）
-                if "google_ai_studio" in engine_name or engine_name == "google_cloud_tts":
+                if "google_ai_studio" in engine_name :
                     audio_files = await engine.synthesize_speech(text, voice_model, speed, api_key=api_key)
                 else:
                     audio_files = await engine.synthesize_speech(text, voice_model, speed)
@@ -1228,16 +1228,16 @@ class VoiceEngineManager:
         """現在選択されている音声エンジンの名前を返す。"""
         return self.current_engine
 
-# キャラクター管理システム v2.2（6エンジン完全対応版）
+# キャラクター管理システム v2.2（4エンジン完全対応版）
 class CharacterManager:
-    """キャラクター作成・編集・管理システム v2.2（6エンジン完全対応・機能削減なし）"""
+    """キャラクター作成・編集・管理システム v2.2（4エンジン完全対応・機能削減なし）"""
     
     def __init__(self, config_manager):
         self.config = config_manager
         self.character_templates = self._load_templates()
     
     def _load_templates(self):
-        """キャラクターテンプレート定義 v2.2（6エンジン完全対応）"""
+        """キャラクターテンプレート定義 v2.2（4エンジン完全対応）"""
         return {
             "最新AI系": {
                 "personality": {
@@ -1403,7 +1403,7 @@ class CharacterManager:
         if custom_settings:
             char_data.update(custom_settings)
         
-        # デフォルト音声設定（v2.2・6エンジン対応）
+        # デフォルト音声設定（v2.2・4エンジン対応）
         if "voice_settings" not in char_data:
             char_data["voice_settings"] = {
                 "engine": "google_ai_studio_new",  # デフォルトエンジン（最新）
@@ -1475,9 +1475,9 @@ YouTubeライブ配信での短時間の応答に適した内容にしてくだ�
         """保存されている全てのキャラクターデータを辞書として返す。"""
         return self.config.get_all_characters()
 
-# キャラクター編集ダイアログ（6エンジン完全対応版）
+# キャラクター編集ダイアログ（4エンジン完全対応版）
 class CharacterEditDialog:
-    """キャラクター作成・編集ダイアログ v2.2（6エンジン完全対応・機能削減なし）"""
+    """キャラクター作成・編集ダイアログ v2.2（4エンジン完全対応・機能削減なし）"""
     
     def __init__(self, parent, character_manager, char_id=None, char_data=None):
         self.character_manager = character_manager
@@ -1732,7 +1732,7 @@ class CharacterEditDialog:
         self.update_voice_models()
     
     def update_voice_models(self):
-        """選択された音声エンジンに応じて音声モデルリストを更新（6エンジン完全対応）"""
+        """選択された音声エンジンに応じて音声モデルリストを更新（4エンジン完全対応）"""
         engine = self.voice_engine_var.get()
         
         # エンジンごとに音声モデルを取得
@@ -1770,8 +1770,8 @@ class CharacterEditDialog:
             self.engine_info_label.config(text=info_text)
     
     def test_voice(self):
-        """音声テスト（6エンジン完全対応）"""
-        text = f"こんにちは！私は{self.name_var.get() or 'テスト'}です。6つの音声エンジンに完全対応したシステムでお話しています。"
+        """音声テスト（4エンジン完全対応）"""
+        text = f"こんにちは！私は{self.name_var.get() or 'テスト'}です。4つの音声エンジンに完全対応したシステムでお話しています。"
         voice_engine = self.voice_engine_var.get()
         voice_model = self.voice_var.get()
         speed = self.speed_var.get()
@@ -1883,7 +1883,7 @@ class CharacterEditDialog:
                     
                     time.sleep(1)  # 次のエンジンとの間隔
                 
-                print("🎉 6エンジン比較完了")
+                print("🎉 4エンジン比較完了")
                 
             except Exception as e:
                 print(f"比較テストエラー: {e}")
@@ -1971,7 +1971,7 @@ class CharacterEditDialog:
             action = "編集" if self.is_edit_mode else "作成"
             messagebox.showerror("エラー", f"キャラクターの{action}に失敗しました: {e}")
 
-# メインGUIアプリケーション v2.2（6エンジン完全対応版・機能削減なし）
+# メインGUIアプリケーション v2.2（4エンジン完全対応版・機能削減なし）
 class AITuberMainGUI:
     """
     完全版AITuberシステムGUI v2.2 - 4エンジン完全対応版
@@ -2218,8 +2218,8 @@ class AITuberMainGUI:
         ttk.Button(advanced_ops, text="📊 性能測定", 
                   command=self.measure_character_performance).pack(side=tk.LEFT, padx=5)
         
-        # テンプレート情報（6エンジン完全対応版）
-        template_frame = ttk.LabelFrame(char_frame, text="テンプレート一覧 v2.2（6エンジン完全対応）", padding="10")
+        # テンプレート情報（4エンジン完全対応版）
+        template_frame = ttk.LabelFrame(char_frame, text="テンプレート一覧 v2.2（4エンジン完全対応）", padding="10")
         template_frame.pack(fill=tk.X, padx=10, pady=5)
         
         template_info = tk.Text(template_frame, height=10, width=100, wrap=tk.WORD, state=tk.DISABLED)
@@ -2246,7 +2246,7 @@ class AITuberMainGUI:
         template_info.config(state=tk.DISABLED)
     
     def create_debug_tab(self):
-        """デバッグ・テストタブ（6エンジン完全対応版）"""
+        """デバッグ・テストタブ（4エンジン完全対応版）"""
         debug_frame = ttk.Frame(self.notebook)
         self.notebook.add(debug_frame, text="🔧 デバッグ")
         
@@ -2333,7 +2333,7 @@ class AITuberMainGUI:
         chat_control_frame = ttk.Frame(chat_test_frame)
         chat_control_frame.pack(fill=tk.X, pady=(0,5))
         
-        ttk.Label(chat_control_frame, text="AIとの会話テスト（文章生成: Google AI Studio + 音声合成: 6エンジン対応）:").pack(side=tk.LEFT)
+        ttk.Label(chat_control_frame, text="AIとの会話テスト（文章生成: Google AI Studio + 音声合成: 4エンジン対応）:").pack(side=tk.LEFT)
         ttk.Button(chat_control_frame, text="🗑️ チャットクリア", 
                   command=self.clear_chat).pack(side=tk.RIGHT, padx=5)
         ttk.Button(chat_control_frame, text="💾 チャット保存", 
@@ -2725,7 +2725,7 @@ class AITuberMainGUI:
             return '🌸 癒し系'
         elif 'ずんだもん' in str(char_data) or voice_engine == 'voicevox':
             return '🎭 ずんだもん系'
-        elif voice_engine == 'google_cloud_tts' or 'Wavenet' in voice_model:
+        elif voice_engine == 'Wavenet' in voice_model:
             return '⭐ 高品質系'
         else:
             return '⚙️ カスタム'
@@ -3014,7 +3014,7 @@ class AITuberMainGUI:
                     default_voice = voices[0] if voices else "default"
                     
                     api_key_to_use = None
-                    if "google_ai_studio" in engine_name: # google_ai_studio_new と google_ai_studio_legacy
+                    if "google_ai_studio" in engine_name: # google_ai_studio_new
                         api_key_to_use = self.config.get_system_setting("google_ai_api_key")
 
                     if api_key_to_use:
@@ -3193,7 +3193,7 @@ class AITuberMainGUI:
 
             # 優先エンジンに応じて適切なAPIキーを選択
             api_key_to_use = None
-            if "google_ai_studio" in voice_engine: # google_ai_studio_new または google_ai_studio_legacy
+            if "google_ai_studio" in voice_engine: # google_ai_studio_new
                 api_key_to_use = google_ai_api_key
             
             # フォールバック機能付き音声合成
@@ -3579,8 +3579,6 @@ class AITuberMainGUI:
                 kwargs = {}
                 if "google_ai_studio" in engine_name:
                     kwargs['api_key'] = api_key_google_ai
-                elif engine_name == "google_cloud_tts":
-                    kwargs['api_key'] = api_key_google_cloud
 
                 audio_files = loop.run_until_complete(
                     engine_instance.synthesize_speech(text_to_synthesize, voice_model, speed, **kwargs)
@@ -3711,8 +3709,6 @@ class AITuberMainGUI:
                 kwargs = {}
                 if "google_ai_studio" in engine_name:
                     kwargs['api_key'] = api_key_google_ai
-                elif engine_name == "google_cloud_tts":
-                    kwargs['api_key'] = api_key_google_cloud
 
                 audio_files = loop.run_until_complete(
                     engine_instance.synthesize_speech(text_to_synthesize, voice_model, speed, **kwargs)
