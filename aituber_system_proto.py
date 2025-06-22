@@ -1253,7 +1253,7 @@ class CharacterManager:
                 },
                 "voice_settings": {
                     "engine": "google_ai_studio_new",
-                    "model": "puck", # Updated model name to a supported one
+                    "model": "puck", # GoogleAIStudioNewVoiceAPIで定義された短いモデル名
                     "speed": 1.0
                 }
             },
@@ -1361,7 +1361,7 @@ class CharacterManager:
                 },
                 "voice_settings": {
                     "engine": "google_ai_studio_new",
-                    "model": "puck", # Or another suitable model from GoogleAIStudioNewVoiceAPI
+                    "model": "achernar", # GoogleAIStudioNewVoiceAPIで定義された短いモデル名 (puck以外で例示)
                     "speed": 1.0
                 }
             },
@@ -1379,7 +1379,7 @@ class CharacterManager:
                 },
                 "voice_settings": {
                     "engine": "google_ai_studio_new",
-                    "model": "puck", # Updated model name to a supported one
+                    "model": "vindemiatrix", # GoogleAIStudioNewVoiceAPIで定義された短いモデル名 (puck以外で例示)
                     "speed": 1.0
                 }
             }
@@ -1390,27 +1390,52 @@ class CharacterManager:
         char_id = str(uuid.uuid4())
         
         if template_name and template_name in self.character_templates:
-            char_data = self.character_templates[template_name].copy()
+            char_data = self.character_templates[template_name].copy() # copy() を使用してテンプレートの変更を防ぐ
+            # テンプレートからロードした場合でも、不足している可能性のあるキーをデフォルトで補完
+            # 特に voice_settings は重要
+            default_blank = self._create_blank_character()
+            if "voice_settings" not in char_data:
+                char_data["voice_settings"] = default_blank["voice_settings"].copy()
+            else: # voice_settings が存在する場合でも、個別のキーが不足している可能性を考慮
+                for key, value in default_blank["voice_settings"].items():
+                    if key not in char_data["voice_settings"]:
+                        char_data["voice_settings"][key] = value
+
+            if "personality" not in char_data:
+                char_data["personality"] = default_blank["personality"].copy()
+            else:
+                for key, value in default_blank["personality"].items():
+                    if key not in char_data["personality"]:
+                        char_data["personality"][key] = value
+
+            if "response_settings" not in char_data:
+                char_data["response_settings"] = default_blank["response_settings"].copy()
+            else:
+                for key, value in default_blank["response_settings"].items():
+                    if key not in char_data["response_settings"]:
+                        char_data["response_settings"][key] = value
         else:
             char_data = self._create_blank_character()
         
         char_data["name"] = name
         char_data["created_at"] = datetime.now().isoformat()
         char_data["char_id"] = char_id
-        char_data["version"] = "2.2"
+        char_data["version"] = "2.2" # バージョン情報を付与
         
-        # カスタム設定を適用
+        # カスタム設定を適用（テンプレート適用後にカスタム設定で上書き）
         if custom_settings:
-            char_data.update(custom_settings)
-        
-        # デフォルト音声設定（v2.2・4エンジン対応）
-        if "voice_settings" not in char_data:
-            char_data["voice_settings"] = {
-                "engine": "google_ai_studio_new",  # デフォルトエンジン（最新）
-                "model": "puck", # Updated model name to a supported one
-                "speed": 1.0,
-                "volume": 1.0
-            }
+            # ネストされた辞書も考慮して深くマージする (ここでは単純な update を使用)
+            # より複雑なマージが必要な場合は、専用のユーティリティ関数を検討
+            if "personality" in custom_settings and isinstance(custom_settings["personality"], dict):
+                if "personality" not in char_data: char_data["personality"] = {}
+                char_data["personality"].update(custom_settings.pop("personality"))
+            if "voice_settings" in custom_settings and isinstance(custom_settings["voice_settings"], dict):
+                if "voice_settings" not in char_data: char_data["voice_settings"] = {}
+                char_data["voice_settings"].update(custom_settings.pop("voice_settings"))
+            if "response_settings" in custom_settings and isinstance(custom_settings["response_settings"], dict):
+                if "response_settings" not in char_data: char_data["response_settings"] = {}
+                char_data["response_settings"].update(custom_settings.pop("response_settings"))
+            char_data.update(custom_settings) # 残りのトップレベルキーを更新
         
         self.config.save_character(char_id, char_data)
         return char_id
@@ -1418,6 +1443,7 @@ class CharacterManager:
     def _create_blank_character(self):
         """空のキャラクタープレート v2.2（完全版）"""
         return {
+            "name": "", # 名前は create_character で設定される
             "personality": {
                 "base_tone": "親しみやすく自然な、バランスの取れた",
                 "speech_style": "丁寧語と親しい口調のバランス、自然な会話",
@@ -1430,11 +1456,12 @@ class CharacterManager:
                 "emotion_level": "普通"
             },
             "voice_settings": {
-                "engine": "google_ai_studio_new",
-                "model": "gemini-2.5-flash-preview-tts-alloy", # Updated model name
+                "engine": "google_ai_studio_new", # デフォルトエンジン（最新）
+                "model": "puck",                   # GoogleAIStudioNewVoiceAPIのデフォルト的な短いモデル名
                 "speed": 1.0,
-                "volume": 1.0
+                "volume": 1.0 # volume は現状の音声エンジンでは直接使われていないが、将来的な拡張性のため
             }
+            # char_id, created_at, version などは create_character で付与
         }
     
     def get_character_prompt(self, char_id):
@@ -1530,9 +1557,11 @@ class CharacterEditDialog:
             for i, template in enumerate(templates):
                 row = i // 2
                 col = i % 2
-                ttk.Radiobutton(template_grid, text=template, 
-                               variable=self.template_var, value=template).grid(row=row, column=col, sticky=tk.W, padx=10)
-        
+                rb = ttk.Radiobutton(template_grid, text=template,
+                                     variable=self.template_var, value=template,
+                                     command=self.on_template_changed) # テンプレート変更時のコマンドを追加
+                rb.grid(row=row, column=col, sticky=tk.W, padx=10)
+
         # 性格設定
         personality_frame = ttk.LabelFrame(self.dialog, text="性格設定（詳細）", padding="10")
         personality_frame.pack(fill=tk.X, padx=10, pady=10)
@@ -1726,6 +1755,58 @@ class CharacterEditDialog:
             # else: 保存されていたモデル名が短い形式であるか、または他のエンジンである場合は、
             #       既に update_voice_models と voice_settings.get('model', ...) の組み合わせで
             #       適切な値が self.voice_var に設定されているはずなので、ここでは何もしない。
+
+    def on_template_changed(self, event=None):
+        """テンプレート選択が変更された際の処理。UIの各フィールドを更新する。"""
+        selected_template_name = self.template_var.get()
+        if selected_template_name == "カスタム":
+            # カスタム選択時はフィールドをクリアまたはデフォルト値に
+            self.base_tone_var.set("")
+            self.speech_style_var.set("")
+            self.traits_text.delete(1.0, tk.END)
+            self.topics_text.delete(1.0, tk.END)
+            self.voice_engine_var.set("google_ai_studio_new") # デフォルトエンジン
+            self.update_voice_models() # エンジン変更に伴いモデルリスト更新
+            # self.voice_var.set("") # update_voice_models内でデフォルトが設定される
+            self.speed_var.set(1.0)
+            self.response_length_var.set("1-2文程度")
+            self.emoji_var.set(True)
+            self.emotion_var.set("普通")
+            return
+
+        template_data = self.character_manager.character_templates.get(selected_template_name)
+        if not template_data:
+            return # テンプレートデータが見つからない場合は何もしない
+
+        # 性格設定を更新
+        personality = template_data.get("personality", {})
+        self.base_tone_var.set(personality.get("base_tone", ""))
+        self.speech_style_var.set(personality.get("speech_style", ""))
+        self.traits_text.delete(1.0, tk.END)
+        self.traits_text.insert(1.0, "\n".join(personality.get("character_traits", [])))
+        self.topics_text.delete(1.0, tk.END)
+        self.topics_text.insert(1.0, "\n".join(personality.get("favorite_topics", [])))
+
+        # 音声設定を更新
+        voice_settings = template_data.get("voice_settings", {})
+        self.voice_engine_var.set(voice_settings.get("engine", "google_ai_studio_new"))
+        self.update_voice_models() # エンジン変更に伴いモデルリスト更新
+        # self.voice_var が update_voice_models の後に設定されるようにする
+        # 正しいモデルが選択されるように、update_voice_models の後に設定
+        selected_model = voice_settings.get("model", "")
+        if selected_model and selected_model in self.voice_combo['values']:
+            self.voice_var.set(selected_model)
+        elif self.voice_combo['values']: # モデルリストにない場合、リストの最初のものを選択
+            self.voice_var.set(self.voice_combo['values'][0])
+        # else: モデルリストも空の場合は設定しない（エラーケース）
+
+        self.speed_var.set(voice_settings.get("speed", 1.0))
+
+        # 応答設定を更新
+        response_settings = template_data.get("response_settings", {})
+        self.response_length_var.set(response_settings.get("max_length", "1-2文程度"))
+        self.emoji_var.set(response_settings.get("use_emojis", True))
+        self.emotion_var.set(response_settings.get("emotion_level", "普通"))
     
     def on_engine_changed(self, event=None):
         """音声エンジン選択が変更された際の処理。音声モデルのリストを更新する。"""
