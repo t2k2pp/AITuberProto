@@ -2523,38 +2523,6 @@ class AITuberMainGUI:
         ttk.Checkbutton(system_grid, text="デバッグモード", 
                        variable=self.debug_mode_var).grid(row=0, column=1, sticky=tk.W, padx=20)
         
-        self.performance_monitoring_var = tk.BooleanVar()
-        ttk.Checkbutton(system_grid, text="パフォーマンス監視", 
-                       variable=self.performance_monitoring_var).grid(row=0, column=2, sticky=tk.W, padx=20)
-        
-        # 高度な設定
-        self.auto_update_var = tk.BooleanVar()
-        ttk.Checkbutton(system_grid, text="自動アップデート", 
-                       variable=self.auto_update_var).grid(row=1, column=0, sticky=tk.W)
-        
-        self.telemetry_var = tk.BooleanVar()
-        ttk.Checkbutton(system_grid, text="使用統計の送信", 
-                       variable=self.telemetry_var).grid(row=1, column=1, sticky=tk.W, padx=20)
-        
-        self.experimental_features_var = tk.BooleanVar()
-        ttk.Checkbutton(system_grid, text="実験的機能", 
-                       variable=self.experimental_features_var).grid(row=1, column=2, sticky=tk.W, padx=20)
-        
-        # 音声品質設定
-        quality_frame = ttk.Frame(system_frame)
-        quality_frame.pack(fill=tk.X, pady=10)
-        
-        ttk.Label(quality_frame, text="音声品質:").pack(side=tk.LEFT)
-        self.audio_quality_var = tk.StringVar(value="標準")
-        quality_combo = ttk.Combobox(quality_frame, textvariable=self.audio_quality_var,
-                                    values=["低品質", "標準", "高品質", "最高品質"], state="readonly")
-        quality_combo.pack(side=tk.LEFT, padx=10)
-        
-        ttk.Label(quality_frame, text="音声遅延:").pack(side=tk.LEFT, padx=(20,0))
-        self.audio_latency_var = tk.DoubleVar(value=0.2)
-        ttk.Scale(quality_frame, from_=0.0, to=1.0, variable=self.audio_latency_var,
-                 orient=tk.HORIZONTAL, length=150).pack(side=tk.LEFT, padx=10)
-        
         # 設定保存ボタン
         save_frame = ttk.Frame(settings_frame)
         save_frame.pack(fill=tk.X, padx=10, pady=20)
