@@ -2383,8 +2383,8 @@ class AITuberMainGUI:
                   command=self.test_voice).pack(side=tk.LEFT, padx=5)
         ttk.Button(test_buttons, text="🔄 全エンジン比較", 
                   command=self.compare_engines).pack(side=tk.LEFT, padx=5)
-        ttk.Button(test_buttons, text="🎯 フォールバックテスト", 
-                  command=self.test_fallback).pack(side=tk.LEFT, padx=5)
+        ttk.Button(test_buttons, text="⚠️ フォールバック手動テスト案内",
+                  command=self.show_fallback_test_info).pack(side=tk.LEFT, padx=5)
         ttk.Button(test_buttons, text="📊 エンジン状態確認", 
                   command=self.check_engines_status).pack(side=tk.LEFT, padx=5)
         ttk.Button(test_buttons, text="⚡ 性能ベンチマーク", 
@@ -3125,38 +3125,55 @@ class AITuberMainGUI:
             return
         
         self.log("🔄 フォールバック機能テスト開始...")
-        threading.Thread(target=self._run_fallback_test, args=(text,), daemon=True).start()
+        # threading.Thread(target=self._run_fallback_test, args=(text,), daemon=True).start() # 削除したメソッドの呼び出しなのでコメントアウト
+        self.show_fallback_test_info() # 新しい情報表示メソッドを呼び出すように変更
     
-    def _run_fallback_test(self, text):
-        """フォールバック機能テストの実行"""
-        try:
-            loop = asyncio.new_event_loop()
-            asyncio.set_event_loop(loop)
+    # _run_fallback_test メソッドはユーザーの指示により削除
+    # def _run_fallback_test(self, text):
+    #     """フォールバック機能テストの実行"""
+    #     try:
+    #         loop = asyncio.new_event_loop()
+    #         asyncio.set_event_loop(loop)
             
-            # 故意に存在しないエンジンから開始してフォールバックをテスト
-            audio_files = loop.run_until_complete(
-                self.voice_manager.synthesize_with_fallback(
-                    text, "default", 1.0, preferred_engine="nonexistent_engine", api_key=self.config.get_system_setting("google_ai_api_key")
-                )
-            )
+    #         # 故意に存在しないエンジンから開始してフォールバックをテスト
+    #         audio_files = loop.run_until_complete(
+    #             self.voice_manager.synthesize_with_fallback(
+    #                 text, "default", 1.0, preferred_engine="nonexistent_engine", api_key=self.config.get_system_setting("google_ai_api_key")
+    #             )
+    #         )
             
-            if audio_files:
-                loop.run_until_complete(
-                    self.audio_player.play_audio_files(audio_files)
-                )
-                self.log("✅ フォールバック機能が正常に動作しました")
-            else:
-                self.log("❌ フォールバック機能が失敗しました")
+    #         if audio_files:
+    #             loop.run_until_complete(
+    #                 self.audio_player.play_audio_files(audio_files)
+    #             )
+    #             self.log("✅ フォールバック機能が正常に動作しました")
+    #         else:
+    #             self.log("❌ フォールバック機能が失敗しました")
             
-            loop.close()
+    #         loop.close()
             
-        except Exception as e:
-            self.log(f"❌ フォールバックテストエラー: {e}")
+    #     except Exception as e:
+    #         self.log(f"❌ フォールバックテストエラー: {e}")
     
     def check_engines_status(self):
         """エンジン状態確認"""
         self.log("📊 音声エンジン状態確認開始...")
         threading.Thread(target=self._check_engines_status, daemon=True).start()
+
+    def show_fallback_test_info(self):
+        """フォールバックテストの手動実行方法をユーザーに案内する"""
+        messagebox.showinfo(
+            "フォールバック手動テスト案内",
+            "フォールバック機能を確認するには、以下の手順をお試しください：\n\n"
+            "1. いずれかの音声エンジンを意図的に利用不可な状態にします。\n"
+            "   (例: VOICEVOXやAvis Speech Engineを終了する、など)\n\n"
+            "2. キャラクター設定で、優先エンジンを「利用不可にしたエンジン」に設定します。\n\n"
+            "3. デバッグタブの「音声テスト」や「AI対話テスト」を実行します。\n\n"
+            "4. コンソールログやAITuberの応答ログで、設定した優先順位に従って\n"
+            "   別のエンジンにフォールバックして音声が再生されるか確認してください。\n\n"
+            "（このボタン自体はテストを実行しません。上記の手順で手動確認をお願いします。）"
+        )
+        self.log("ℹ️ フォールバック手動テストの案内を表示しました。")
     
     def _check_engines_status(self):
         """エンジン状態確認の実行"""
