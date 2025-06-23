@@ -76,7 +76,8 @@ class ConfigManager:
                 "auto_save": True,
                 "debug_mode": False,
                 "audio_device": "default",
-                "cost_mode": "free"
+                "cost_mode": "free",
+                "conversation_history_length": 0 # 会話履歴の保持数 (0は記憶なし、1以上でその回数分の直近の会話を記憶)
             },
             "characters": {},
             "streaming_settings": {
@@ -2074,6 +2075,7 @@ class AITuberMainGUI:
         self.is_streaming = False
         self.current_character_id = ""
         self.aituber_task = None
+        self.debug_chat_history = [] # デバッグチャット用の会話履歴
         
         # ログ設定
         self.setup_logging()
@@ -2523,6 +2525,14 @@ class AITuberMainGUI:
         ttk.Checkbutton(system_grid, text="デバッグモード", 
                        variable=self.debug_mode_var).grid(row=0, column=1, sticky=tk.W, padx=20)
         
+        # 会話履歴保持数設定 (System Settings in GUI)
+        ttk.Label(system_grid, text="会話履歴の長さ:").grid(row=1, column=0, sticky=tk.W, pady=5)
+        self.conversation_history_length_var = tk.IntVar(value=0) # Default value for the UI variable
+        history_spinbox = ttk.Spinbox(system_grid, from_=0, to=100, increment=1, # UI for setting conversation history length
+                                      textvariable=self.conversation_history_length_var, width=5)
+        history_spinbox.grid(row=1, column=1, sticky=tk.W, padx=20, pady=5)
+        ttk.Label(system_grid, text="(0で履歴なし、最大100件)").grid(row=1, column=2, sticky=tk.W, pady=5, padx=5)
+
         # 設定保存ボタン
         save_frame = ttk.Frame(settings_frame)
         save_frame.pack(fill=tk.X, padx=10, pady=20)
@@ -2711,6 +2721,7 @@ class AITuberMainGUI:
         
         self.auto_save_var.set(self.config.get_system_setting("auto_save", True))
         self.debug_mode_var.set(self.config.get_system_setting("debug_mode", False))
+        self.conversation_history_length_var.set(self.config.get_system_setting("conversation_history_length", 0))
         
         # キャラクター一覧更新
         self.refresh_character_list()
@@ -2736,6 +2747,7 @@ class AITuberMainGUI:
             self.config.set_system_setting("voice_engine", self.voice_engine_var.get())
             self.config.set_system_setting("auto_save", self.auto_save_var.get())
             self.config.set_system_setting("debug_mode", self.debug_mode_var.get())
+            self.config.set_system_setting("conversation_history_length", self.conversation_history_length_var.get())
             
             # ストリーミング設定
             if "streaming_settings" not in self.config.config:
@@ -3245,8 +3257,22 @@ class AITuberMainGUI:
             char_prompt = self.character_manager.get_character_prompt(self.current_character_id)
             char_name = char_data.get('name', 'AIちゃん')
             
-            # AI応答生成（文章生成のみ）
-            full_prompt = f"{char_prompt}\n\nユーザー: {message}\n\n自然で親しみやすい返答をしてください。"
+            # 会話履歴の長さを設定から取得
+            history_length = self.config.get_system_setting("conversation_history_length", 0)
+
+            # デバッグチャット用のプロンプトに会話履歴を組み込む
+            history_prompt_parts = []
+            if history_length > 0 and self.debug_chat_history:
+                # 直近の履歴を取得 (最大 history_length 件)
+                relevant_history = self.debug_chat_history[-history_length:]
+                for entry in relevant_history:
+                    # 履歴の各エントリをプロンプトに追加
+                    history_prompt_parts.append(f"ユーザー: {entry['user_message']}")
+                    history_prompt_parts.append(f"{char_name}: {entry['ai_response']}") # AIの発言者名はキャラクター名
+
+            history_str = "\n".join(history_prompt_parts)
+            # 最終的なプロンプト: キャラクター設定 + 会話履歴 + 最新のメッセージ
+            full_prompt = f"{char_prompt}\n\n{history_str}\n\nユーザー: {message}\n\n{char_name}として、自然で親しみやすい返答をしてください。" # AIの発言者名を明示
             
             # response = model.generate_content(full_prompt) # 旧方式
             text_response = client.models.generate_content(
@@ -3293,6 +3319,14 @@ class AITuberMainGUI:
                 )
             
             loop.close()
+
+            # デバッグチャットの会話履歴の記録と管理
+            if history_length > 0:
+                # 現在のやり取りを履歴に追加
+                self.debug_chat_history.append({"user_message": message, "ai_response": ai_response})
+                # 履歴が設定された長さを超えた場合、最も古いものから削除
+                if len(self.debug_chat_history) > history_length:
+                    self.debug_chat_history.pop(0)
             
         except Exception as e:
             error_msg = f"❌ エラー: {str(e)}"
@@ -4357,6 +4391,7 @@ class AITuberStreamingSystem:
         self.previous_comment = ""
         self.viewer_memory = {}
         self.running = False
+        self.chat_history = [] # 会話履歴を保存するリスト
     
     async def run_streaming(self, live_id):
         """配信メインループ"""
@@ -4400,11 +4435,20 @@ class AITuberStreamingSystem:
                                 
                                 # 音声合成・再生
                                 await self.synthesize_and_play(response)
+
+                                # 会話履歴の記録と管理
+                                history_length = self.config.get_system_setting("conversation_history_length", 0)
+                                if history_length > 0:
+                                    # 現在のやり取りを履歴に追加
+                                    self.chat_history.append({"user": author_name, "comment": comment_text, "response": response})
+                                    # 履歴が設定された長さを超えた場合、最も古いものから削除
+                                    if len(self.chat_history) > history_length:
+                                        self.chat_history.pop(0)
                             
                             self.previous_comment = comment_text
                     
                     # 監視間隔
-                    await asyncio.sleep(5)
+                    await asyncio.sleep(self.config.get_system_setting("chat_monitor_interval", 5)) # 設定から取得
                     
                 except Exception as e:
                     self.log(f"⚠️ エラー: {e}")
@@ -4469,8 +4513,22 @@ class AITuberStreamingSystem:
             # キャラクタープロンプト取得
             char_prompt = self.character_manager.get_character_prompt(self.character_id)
             
-            # プロンプト構築
-            full_prompt = f"{char_prompt}\n\n視聴者 {author_name}: {comment_text}\n\n親しみやすく自然な返答をしてください。"
+            # 会話履歴の長さを設定から取得
+            history_length = self.config.get_system_setting("conversation_history_length", 0)
+
+            # プロンプトに会話履歴を組み込む
+            history_prompt_parts = []
+            if history_length > 0 and self.chat_history:
+                # 直近の履歴を取得 (最大 history_length 件)
+                relevant_history = self.chat_history[-history_length:]
+                for entry in relevant_history:
+                    # 履歴の各エントリをプロンプトに追加
+                    history_prompt_parts.append(f"視聴者 {entry['user']}: {entry['comment']}")
+                    history_prompt_parts.append(f"あなた: {entry['response']}") # AI自身の過去の発言として
+
+            history_str = "\n".join(history_prompt_parts)
+            # 最終的なプロンプト: キャラクター設定 + 会話履歴 + 最新のコメント
+            full_prompt = f"{char_prompt}\n\n{history_str}\n\n視聴者 {author_name}: {comment_text}\n\n親しみやすく自然な返答をしてください。"
             
             # AI応答生成（文章生成のみ）
             # response = await asyncio.to_thread( # 旧方式
