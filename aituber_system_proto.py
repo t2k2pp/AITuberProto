@@ -79,7 +79,8 @@ class ConfigManager:
                 "debug_mode": False,
                 "audio_device": "default",
                 "cost_mode": "free",
-                "conversation_history_length": 0 # 会話履歴の保持数 (0は記憶なし、1以上でその回数分の直近の会話を記憶)
+                "conversation_history_length": 0, # 会話履歴の保持数 (0は記憶なし、1以上でその回数分の直近の会話を記憶)
+                "text_generation_model": "gemini-1.5-flash-latest" # デフォルトのテキスト生成モデルを更新
             },
             "characters": {},
             "streaming_settings": {
@@ -2275,6 +2276,34 @@ class AITuberMainGUI:
         self.current_character_id = ""
         self.aituber_task = None
         self.debug_chat_history = [] # デバッグチャット用の会話履歴
+        self.available_gemini_models = [
+            "gemini-1.5-flash",
+            "gemini-1.5-flash-latest",
+            "gemini-1.5-pro",
+            "gemini-1.5-pro-latest",
+            # "gemini-2.0-flash", # APIドキュメントに記載なし (2024/03時点)
+            # "gemini-2.0-pro",   # APIドキュメントに記載なし (2024/03時点)
+            # "gemini-2.5-flash-lite", # v1beta generateContent で未対応のため削除 (2024/06/24確認)
+            "gemini-2.5-flash",
+            "gemini-2.5-pro"      # 仮追加 (APIでの利用可否とプレビュー状況の確認が必要)
+        ]
+        # モデル名のソート (バージョン、精度の順)
+        # 簡単なソートキー関数を定義
+        def sort_key_gemini(model_name):
+            parts = model_name.split('-')
+            version_str = parts[1] # "1.5", "2.5"など
+            try:
+                version_major = float(version_str)
+            except ValueError:
+                version_major = 0 # エラーの場合は先頭に
+
+            precision_order = {"lite": 0, "flash": 1, "pro": 2}
+            precision_val = precision_order.get(parts[2] if len(parts) > 2 else (parts[0] if parts[0] in precision_order else "flash"), 1)
+
+            is_latest = "latest" in model_name
+            return (version_major, precision_val, is_latest)
+
+        self.available_gemini_models.sort(key=sort_key_gemini)
         
         # ログ設定
         self.setup_logging()
@@ -2673,6 +2702,16 @@ class AITuberMainGUI:
         youtube_entry = ttk.Entry(api_grid, textvariable=self.youtube_api_var, width=50, show="*")
         youtube_entry.grid(row=1, column=1, padx=10, pady=2)
         ttk.Button(api_grid, text="テスト", command=self.test_youtube_api).grid(row=1, column=2, padx=5)
+
+        # テキスト生成モデル選択
+        ttk.Label(api_grid, text="テキスト生成モデル (Gemini):").grid(row=2, column=0, sticky=tk.W, pady=2)
+        self.text_generation_model_var = tk.StringVar()
+        self.text_generation_model_combo = ttk.Combobox(
+            api_grid, textvariable=self.text_generation_model_var,
+            values=self._get_display_gemini_models(), # 表示用リスト生成メソッドを使用
+            state="readonly", width=47
+        )
+        self.text_generation_model_combo.grid(row=2, column=1, padx=10, pady=2, sticky=tk.W)
         
         # 音声エンジン設定（4エンジン完全対応）
         voice_frame = ttk.LabelFrame(settings_frame, text="音声エンジン設定（4エンジン完全対応）", padding="10")
@@ -2856,6 +2895,26 @@ class AITuberMainGUI:
         # ステータス更新を定期実行
         self.update_system_info()
 
+    def _get_display_gemini_models(self):
+        """UI表示用のGeminiモデル名リストを生成（注釈付き）"""
+        display_models = []
+        for model_name in self.available_gemini_models:
+            display_name = model_name
+            if model_name == "gemini-2.5-flash":
+                display_name += " (プレビュー)"
+            elif model_name == "gemini-2.5-pro":
+                display_name += " (プレビュー - クォータ注意)"
+            display_models.append(display_name)
+        return display_models
+
+    def _get_internal_gemini_model_name(self, display_name):
+        """UI表示名から内部的なGeminiモデル名を取得"""
+        if display_name.endswith(" (プレビュー)"):
+            return display_name.replace(" (プレビュー)", "")
+        elif display_name.endswith(" (プレビュー - クォータ注意)"):
+            return display_name.replace(" (プレビュー - クォータ注意)", "")
+        return display_name
+
     def populate_audio_output_devices(self):
         """音声出力デバイスのドロップダウンメニューを初期化する"""
         try:
@@ -2950,6 +3009,21 @@ class AITuberMainGUI:
         self.youtube_api_var.set(self.config.get_system_setting("youtube_api_key", ""))
         self.voice_engine_var.set(self.config.get_system_setting("voice_engine", "avis_speech"))
         
+        # テキスト生成モデル設定の読み込み
+        internal_model_name = self.config.get_system_setting("text_generation_model", self._get_internal_gemini_model_name(self._get_display_gemini_models()[0]) if self._get_display_gemini_models() else "")
+
+        display_name_to_set = internal_model_name # デフォルトは内部名
+        for display_name in self._get_display_gemini_models():
+            if self._get_internal_gemini_model_name(display_name) == internal_model_name:
+                display_name_to_set = display_name
+                break
+
+        if display_name_to_set in self._get_display_gemini_models():
+            self.text_generation_model_var.set(display_name_to_set)
+        elif self._get_display_gemini_models(): # フォールバック
+            self.text_generation_model_var.set(self._get_display_gemini_models()[0])
+
+
         # システム音声エンジン変更時の情報表示を初期化
         self.on_system_engine_changed()
         
@@ -2991,6 +3065,11 @@ class AITuberMainGUI:
             self.config.set_system_setting("google_ai_api_key", self.google_ai_var.get())
             self.config.set_system_setting("youtube_api_key", self.youtube_api_var.get())
             self.config.set_system_setting("voice_engine", self.voice_engine_var.get())
+
+            # UI表示名から内部モデル名を取得して保存
+            selected_display_name = self.text_generation_model_var.get()
+            internal_model_name = self._get_internal_gemini_model_name(selected_display_name)
+            self.config.set_system_setting("text_generation_model", internal_model_name)
 
             # 音声出力デバイス設定の保存
             selected_audio_device_name = self.audio_output_device_var.get()
@@ -3532,15 +3611,21 @@ class AITuberMainGUI:
             full_prompt = f"{char_prompt}\n\n{history_str}\n\nユーザー: {message}\n\n{char_name}として、自然で親しみやすい返答をしてください。" # AIの発言者名を明示
             
             # response = model.generate_content(full_prompt) # 旧方式
+            selected_model = self.config.get_system_setting("text_generation_model", "gemini-1.5-flash")
             text_response = client.models.generate_content(
-                model="gemini-1.5-flash", # テキスト生成に適したモデル (gemini-2.5-flashでも可)
+                model=selected_model, # 設定から読み込んだモデルを使用
                 contents=full_prompt,
                 config=genai.types.GenerateContentConfig( # 引数名を config に修正
                     temperature=0.9,
                     max_output_tokens=150
                 )
             )
-            ai_response = text_response.text.strip()
+
+            if text_response.text is None:
+                self.log(f"⚠️ AI応答がNoneでした (モデル: {selected_model})。")
+                ai_response = "ごめんなさい、ちょっと考えがまとまりませんでした。"
+            else:
+                ai_response = text_response.text.strip()
             
             # GUI更新
             self.root.after(0, lambda: self.chat_display.insert(tk.END, f"🤖 {char_name}: {ai_response}\n"))
@@ -3585,11 +3670,27 @@ class AITuberMainGUI:
                 if len(self.debug_chat_history) > history_length:
                     self.debug_chat_history.pop(0)
             
-        except Exception as e:
-            error_msg = f"❌ エラー: {str(e)}"
+        except genai.types.generation_types.BlockedPromptException as bpe:
+            error_msg = "❌ AIちゃん: その内容についてはお答えできません。"
+            self.log(f"❌ テスト応答生成エラー: プロンプトがブロックされました。{bpe}")
             self.root.after(0, lambda: self.chat_display.insert(tk.END, f"{error_msg}\n"))
             self.root.after(0, lambda: self.chat_display.see(tk.END))
-            self.log(f"❌ テスト応答生成エラー: {e}")
+        except requests.exceptions.HTTPError as http_err:
+            if http_err.response.status_code == 429:
+                error_msg = "❌ AIちゃん: APIの利用上限に達したみたいです。少し時間をおいて試してみてくださいね。"
+                self.log(f"❌ テスト応答生成エラー: API利用上限 (429)。{http_err}")
+            else:
+                error_msg = f"❌ AIちゃん: サーバーとの通信エラー ({http_err.response.status_code})。"
+                self.log(f"❌ テスト応答生成エラー: HTTPエラー {http_err.response.status_code}。{http_err}")
+            self.root.after(0, lambda: self.chat_display.insert(tk.END, f"{error_msg}\n"))
+            self.root.after(0, lambda: self.chat_display.see(tk.END))
+        except Exception as e:
+            error_msg = f"❌ AIちゃん: ちょっと調子が悪いみたいです。ごめんなさいね。"
+            self.log(f"❌ テスト応答生成エラー: 予期せぬエラー。{e}")
+            import traceback
+            self.log(f"詳細トレース: {traceback.format_exc()}")
+            self.root.after(0, lambda: self.chat_display.insert(tk.END, f"{error_msg}\n"))
+            self.root.after(0, lambda: self.chat_display.see(tk.END))
     
     def toggle_streaming(self):
         """配信開始/停止切り替え"""
@@ -4649,6 +4750,34 @@ class AITuberStreamingSystem:
         self.viewer_memory = {}
         self.running = False
         self.chat_history = [] # 会話履歴を保存するリスト
+        self.available_gemini_models = [
+            "gemini-1.5-flash",
+            "gemini-1.5-flash-latest",
+            "gemini-1.5-pro",
+            "gemini-1.5-pro-latest",
+            # "gemini-2.0-flash", # APIドキュメントに記載なし (2024/03時点)
+            # "gemini-2.0-pro",   # APIドキュメントに記載なし (2024/03時点)
+            # "gemini-2.5-flash-lite", # v1beta generateContent で未対応のため削除 (2024/06/24確認)
+            "gemini-2.5-flash",
+            "gemini-2.5-pro"      # 仮追加 (APIでの利用可否とプレビュー状況の確認が必要)
+        ]
+        # モデル名のソート (バージョン、精度の順)
+        # 簡単なソートキー関数を定義
+        def sort_key_gemini(model_name):
+            parts = model_name.split('-')
+            version_str = parts[1] # "1.5", "2.5"など
+            try:
+                version_major = float(version_str)
+            except ValueError:
+                version_major = 0 # エラーの場合は先頭に
+
+            precision_order = {"lite": 0, "flash": 1, "pro": 2}
+            precision_val = precision_order.get(parts[2] if len(parts) > 2 else (parts[0] if parts[0] in precision_order else "flash"), 1)
+
+            is_latest = "latest" in model_name
+            return (version_major, precision_val, is_latest)
+
+        self.available_gemini_models.sort(key=sort_key_gemini)
     
     async def run_streaming(self, live_id):
         """配信メインループ"""
@@ -4797,9 +4926,10 @@ class AITuberStreamingSystem:
             #         'top_p': 0.8
             #     }
             # )
+            selected_model = self.config.get_system_setting("text_generation_model", "gemini-1.5-flash") # 設定からモデル名を取得
             text_response = await asyncio.to_thread(
                 self.client.models.generate_content, # client を使用
-                model="gemini-1.5-flash",  # テキスト生成に適したモデル
+                model=selected_model,  # 設定から読み込んだモデルを使用
                 contents=full_prompt,
                 config=genai.types.GenerateContentConfig( # 引数名を config に修正
                     temperature=0.9,
@@ -4808,11 +4938,26 @@ class AITuberStreamingSystem:
                 )
             )
             
+            if text_response.text is None:
+                self.log("⚠️ AI応答がNoneでした。")
+                return "ごめんなさい、うまく言葉が出てきませんでした。"
             return text_response.text.strip()
             
+        except genai.types.generation_types.BlockedPromptException as bpe:
+            self.log(f"❌ 応答生成エラー: プロンプトがブロックされました。{bpe}")
+            return "ごめんなさい、その内容についてはお答えできません。"
+        except requests.exceptions.HTTPError as http_err:
+            if http_err.response.status_code == 429:
+                self.log(f"❌ 応答生成エラー: API利用上限に達した可能性があります (429)。{http_err}")
+                return "APIの利用上限に達したみたいです。少し時間をおいて試してみてくださいね。"
+            else:
+                self.log(f"❌ 応答生成エラー: HTTPエラーが発生しました。{http_err}")
+                return "ごめんなさい、サーバーとの通信でエラーが起きたみたいです。"
         except Exception as e:
-            self.log(f"応答生成エラー: {e}")
-            return "ちょっと聞こえへんかったわ〜😅"
+            self.log(f"❌ 応答生成エラー: 予期せぬエラーが発生しました。{e}")
+            import traceback
+            self.log(f"詳細トレース: {traceback.format_exc()}")
+            return "ちょっと調子が悪いみたいです。ごめんなさいね。"
     
     async def synthesize_and_play(self, text):
         """音声合成・再生 v2.1（修正版）"""
