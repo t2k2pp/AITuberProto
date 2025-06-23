@@ -42,6 +42,8 @@ import aiohttp
 #import urllib.parse
 import base64
 import wave # wave モジュールをインポート
+import re # 正規表現モジュールをインポート
+import json # JSONモジュールをインポート (macOSデバイス取得で使用)
 
 # 設定管理クラス（完全版）
 class ConfigManager:
@@ -921,10 +923,152 @@ class AudioPlayer:
     VSeeFace/VTube Studioのリップシンク対応
     """
     
-    def __init__(self):
+    def __init__(self, config_manager=None): # config_manager を追加
         self.current_process = None
         self.system = platform.system()
-    
+        self.config_manager = config_manager
+
+    def get_available_output_devices(self):
+        """利用可能な音声出力デバイスの一覧を取得する"""
+        devices = [{"name": "デフォルト", "id": "default"}] # デフォルトデバイスオプション
+        try:
+            if self.system == "Windows":
+                # PowerShellコマンドで音声デバイスを取得
+                # Get-AudioDevice -List は AudioDeviceCmdlets モジュールが必要な場合がある
+                # より標準的な方法を試みる
+                import subprocess
+                cmd = 'powershell "Get-CimInstance -Namespace root\\cimv2 -ClassName Win32_SoundDevice | Select-Object -Property Name, DeviceID"'
+                result = subprocess.run(cmd, capture_output=True, text=True, shell=True, encoding='utf-8')
+                if result.returncode == 0:
+                    for line in result.stdout.splitlines():
+                        if "Name" in line and "DeviceID" in line: # ヘッダーをスキップ
+                            continue
+                        if "----" in line: # 区切り線をスキップ
+                            continue
+                        parts = line.strip().split()
+                        if len(parts) >= 2:
+                            name = " ".join(parts[:-1]).strip()
+                            device_id = parts[-1].strip()
+                            if name and device_id: # 空の行を避ける
+                                devices.append({"name": name, "id": device_id})
+                else:
+                    print(f"Windows: Get-CimInstance を使用したデバイス取得に失敗しました: {result.stderr}")
+                    #代替手段 (より基本的なコマンド)
+                    cmd_alt = 'powershell "Get-WmiObject -Class Win32_SoundDevice | Select-Object -Property Name, DeviceID"'
+                    result_alt = subprocess.run(cmd_alt, capture_output=True, text=True, shell=True, encoding='utf-8')
+                    if result_alt.returncode == 0:
+                        for line in result_alt.stdout.splitlines():
+                            if "Name" in line and "DeviceID" in line: continue
+                            if "----" in line: continue
+                            parts = line.strip().split()
+                            if len(parts) >= 2:
+                                name = " ".join(parts[:-1]).strip()
+                                device_id = parts[-1].strip()
+                                if name and device_id:
+                                     devices.append({"name": name, "id": device_id})
+                    else:
+                        print(f"Windows: Get-WmiObject を使用したデバイス取得にも失敗しました: {result_alt.stderr}")
+
+
+            elif self.system == "Darwin": # macOS
+                import subprocess
+                # system_profiler SPAudioDataType は詳細すぎる場合がある。よりシンプルなコマンドを検討。
+                # 'audiodevice' コマンドは標準ではないため、 'switchaudio-osx' (https://github.com/deweller/switchaudio-osx) のような
+                # 外部ツールをユーザーにインストールしてもらうか、より基本的な方法を探す。
+                # ここでは system_profiler を使い、出力デバイスのみをフィルタリングする。
+                cmd = "system_profiler SPAudioDataType -json"
+                try:
+                    result = subprocess.run(cmd, capture_output=True, text=True, shell=True, check=True)
+                    data = json.loads(result.stdout)
+                    audio_data = data.get("SPAudioDataType", [])
+                    for item in audio_data:
+                        # 'items' の中に実際のデバイス情報が含まれることがある
+                        # 'coreaudio_output_source' などでフィルタリング
+                        # 'coreaudio_default_audio_output_device' や 'coreaudio_device_name' を参考にする
+                        # 簡略化のため、ここでは出力デバイスと思われるものをリストアップ
+                        # より正確なフィルタリングが必要
+                        # print(f"macOS device item: {item}") # デバッグ用
+                        # 'items' 配下の 'coreaudio_device_name' を探す
+                        for sub_item in item.get("_items", []):
+                            if sub_item.get("coreaudio_device_transport") == "coreaudio_device_type_builtin_output" or \
+                               sub_item.get("coreaudio_device_transport") == "coreaudio_device_type_external_output" or \
+                               "output" in sub_item.get("coreaudio_device_name","").lower() or \
+                               "speaker" in sub_item.get("coreaudio_device_name","").lower(): # 簡易的な出力デバイス判定
+
+                                device_name = sub_item.get("coreaudio_device_name")
+                                # macOSでは一意のIDが簡単には取れない場合があるので、名前をIDとして使う
+                                if device_name and not any(d['name'] == device_name for d in devices):
+                                    devices.append({"name": device_name, "id": device_name})
+                except (subprocess.CalledProcessError, json.JSONDecodeError, FileNotFoundError) as e:
+                    print(f"macOS: デバイス取得エラー: {e}")
+                    # 代替として、基本的な 'audiodevice' のようなコマンドがあれば使う (ただし標準ではない)
+
+            elif self.system == "Linux":
+                import subprocess
+                cmd = "aplay -L"
+                result = subprocess.run(cmd, capture_output=True, text=True, shell=True)
+                if result.returncode == 0:
+                    current_device_name = None
+                    for line in result.stdout.splitlines():
+                        line = line.strip()
+                        if not line:
+                            continue
+                        # 'default' や 'null' などの特殊なデバイス名も含まれることがある
+                        # ユーザーが選択しやすいように、より具体的な名前を優先する
+                        # 'sysdefault', 'front', 'surround40' など、カード名とデバイス番号の組み合わせもよく使われる
+                        if line.startswith("CARD=") or line.startswith("DEV="): # 詳細情報はスキップ
+                            continue
+                        if re.match(r"^[a-zA-Z0-9_-]+:\d+,\d+$", line): # "hw:0,0" のような形式
+                            device_id = line
+                            # より人間可読な名前を探す (次の行にあることが多い)
+                            # この実装では hw:0,0 のようなIDをそのまま使う
+                            # devices.append({"name": f"Hardware Device ({device_id})", "id": device_id})
+                            # aplay -L の出力は複雑なので、ここでは簡略化して、行全体をID兼名前とする
+                            # ただし、これだとユーザーフレンドリーではない。
+                            # 実際のデバイス名 (例: "HDA Intel PCH, ALC255 Analog") を抽出する必要がある
+                            if line.count(',') == 0 and not line.startswith(" "): # 'default' や 'plughw:CARD=PCH,DEV=0' など
+                                 # 'null', 'pulse', 'default', 'dmix'などを除外するか検討
+                                if line not in ["null", "pulse", "default", "dmix", "dsnoop"]:
+                                    devices.append({"name": line, "id": line})
+                        elif not line.startswith(" ") and ":" not in line and "," not in line: # 比較的シンプルな名前
+                             if line not in ["null", "pulse", "default", "dmix", "dsnoop"]:
+                                devices.append({"name": line, "id": line})
+
+
+                else:
+                    print(f"Linux: aplay -L を使用したデバイス取得に失敗しました: {result.stderr}")
+                    # 代替: pacmd list-sinks (PulseAudioの場合)
+                    cmd_pa = "pacmd list-sinks"
+                    result_pa = subprocess.run(cmd_pa, capture_output=True, text=True, shell=True)
+                    if result_pa.returncode == 0:
+                        name_pattern = re.compile(r"name: <(.*?)>")
+                        desc_pattern = re.compile(r"device.description = \"(.*?)\"")
+                        current_name = None
+                        for line in result_pa.stdout.splitlines():
+                            name_match = name_pattern.search(line)
+                            if name_match:
+                                current_name = name_match.group(1)
+                            desc_match = desc_pattern.search(line)
+                            if desc_match and current_name:
+                                devices.append({"name": desc_match.group(1), "id": current_name})
+                                current_name = None # Reset for next sink
+                    else:
+                        print(f"Linux: pacmd list-sinks を使用したデバイス取得にも失敗しました: {result_pa.stderr}")
+
+
+        except Exception as e:
+            print(f"音声出力デバイスの取得中にエラーが発生しました: {e}")
+            # エラーが発生した場合でもデフォルトデバイスは常に利用可能とする
+
+        # 重複排除 (特に default のような汎用名が複数追加されるのを防ぐ)
+        final_devices = []
+        seen_ids = set()
+        for device in devices:
+            if device["id"] not in seen_ids:
+                final_devices.append(device)
+                seen_ids.add(device["id"])
+        return final_devices
+
     async def play_audio_files(self, audio_files, delay_between=0.2):
         """複数音声ファイルを順次再生（完全版）"""
         try:
@@ -960,16 +1104,45 @@ class AudioPlayer:
             print(f"音声ファイル再生エラー: {e}")
     
     async def _play_windows(self, audio_file):
-        """Windows用音声再生（完全版）"""
+        """Windows用音声再生（デバイス指定対応）"""
         try:
+            device_id = "default"
+            if self.config_manager:
+                device_id = self.config_manager.get_system_setting("audio_output_device", "default")
+
+            # PowerShellスクリプトで再生。デバイス指定は難しいので、winsoundを優先的に試す。
+            # winsound はデフォルトデバイスでしか再生できないため、デバイス指定が必要な場合は
+            # より高度なライブラリ (例: sounddevice, pygame.mixer) の利用を検討する必要がある。
+            # ここでは、まず winsound で試行し、失敗した場合に PowerShell の MediaPlayer を使う。
+            # デバイス指定は現状、PowerShellのMediaPlayerでは直接的でないため、
+            # 指定された device_id が 'default' でない場合は警告を出す。
+
+            if device_id != "default":
+                print(f"⚠️ Windows: 指定された音声出力デバイス '{device_id}' での再生は現在サポートされていません。デフォルトデバイスを使用します。")
+                # TODO: 将来的に、AudioDeviceCmdlets (外部) や他のライブラリでデバイス指定再生を実装する。
+                # (例: Set-AudioDevice -ID $deviceId; $mediaPlayer.Play() )
+                # ただし、Set-AudioDevice は永続的な変更なので、再生前後で元に戻す処理が必要。
+
+            try:
+                import winsound
+                # winsound.PlaySoundは非同期ではないため、スレッドで実行してブロッキングを防ぐ
+                # SND_ASYNC は他のサウンドと競合する可能性があるので、ここでは同期的に再生し、
+                # play_audio_files での asyncio.sleep でカバーする。
+                # await asyncio.to_thread(winsound.PlaySound, audio_file, winsound.SND_FILENAME | winsound.SND_ASYNC)
+                await asyncio.to_thread(winsound.PlaySound, audio_file, winsound.SND_FILENAME)
+                print(f"✅ AudioPlayer: winsound.PlaySound ({audio_file}) で再生しました。")
+                return # winsound で成功したらここで終了
+            except Exception as winsound_e:
+                print(f"🐍 AudioPlayer: winsound.PlaySound でエラーが発生しました: {winsound_e}。PowerShell MediaPlayerにフォールバックします。")
+
+            # winsound が失敗した場合、またはデバイス指定が必要な場合のフォールバック (現状デバイス指定なし)
             ps_script = f'''
 Add-Type -AssemblyName presentationCore
 $mediaPlayer = New-Object system.windows.media.mediaplayer
 $mediaPlayer.open("{audio_file}")
 $mediaPlayer.Play()
-# Wait for media to open and duration to be available
 $loaded = $False
-for ($i = 0; $i -lt 50; $i++) {{ # Max 5 seconds wait
+for ($i = 0; $i -lt 50; $i++) {{
     if ($mediaPlayer.NaturalDuration.HasTimeSpan) {{
         $loaded = $True
         break
@@ -977,98 +1150,124 @@ for ($i = 0; $i -lt 50; $i++) {{ # Max 5 seconds wait
     Start-Sleep -Milliseconds 100
 }}
 if ($loaded -and $mediaPlayer.NaturalDuration.TimeSpan.TotalSeconds -gt 0) {{
-    Write-Host "Media loaded. Duration: $($mediaPlayer.NaturalDuration.TimeSpan.TotalSeconds)s"
     while($mediaPlayer.Position -lt $mediaPlayer.NaturalDuration.TimeSpan) {{
         Start-Sleep -Milliseconds 100
     }}
-    Write-Host "Playback finished."
 }} else {{
-    Write-Host "Error: MediaPlayer did not load media correctly or media has zero duration."
-    # Fallback for very short sounds or if duration is not correctly reported, just wait a bit
-    Start-Sleep -Seconds 2 # Wait 2 seconds as a fallback
+    Start-Sleep -Seconds 2
 }}
 $mediaPlayer.Stop()
 $mediaPlayer.Close()
 '''
-            
             process = await asyncio.create_subprocess_exec(
                 "powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", ps_script,
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE
+                stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE
             )
             stdout, stderr = await process.communicate()
-
-            stdout_decoded = stdout.decode('utf-8', errors='ignore').strip()
-            stderr_decoded = stderr.decode('utf-8', errors='ignore').strip()
-
-            if stdout_decoded:
-                print(f"AudioPlayer._play_windows PowerShell STDOUT: {stdout_decoded}")
-            if stderr_decoded:
-                print(f"AudioPlayer._play_windows PowerShell STDERR: {stderr_decoded}")
-
-            if process.returncode != 0 or "エラー" in stderr_decoded.lower() or "error" in stderr_decoded.lower():
-                print(f"❌ AudioPlayer._play_windows: PowerShell再生エラー (returncode={process.returncode}): {stderr_decoded}")
-                print(f"🐍 AudioPlayer: PowerShellでの再生に失敗したため、winsoundにフォールバックします: {audio_file}")
-                try:
-                    import winsound
-                    # winsound.PlaySoundは非同期ではないため、スレッドで実行してブロッキングを防ぐ
-                    await asyncio.to_thread(winsound.PlaySound, audio_file, winsound.SND_FILENAME | winsound.SND_ASYNC)
-                    print(f"✅ AudioPlayer: winsound.PlaySound ({audio_file}) の呼び出しを試みました (非同期)。")
-                except Exception as winsound_e:
-                    print(f"❌ AudioPlayer: winsound.PlaySound でもエラーが発生しました: {winsound_e}")
+            if process.returncode != 0 or "エラー" in stderr.decode('utf-8', errors='ignore').lower() or "error" in stderr.decode('utf-8', errors='ignore').lower():
+                print(f"❌ AudioPlayer._play_windows: PowerShell再生エラー: {stderr.decode('utf-8', errors='ignore')}")
             else:
                 print(f"✅ AudioPlayer._play_windows: PowerShellによる音声再生成功: {audio_file}")
 
         except Exception as e:
-            print(f"❌ Windows音声再生エラー (PowerShell呼び出し前): {e}")
-            print(f"🐍 AudioPlayer: PowerShell呼び出し前にエラーが発生したため、winsoundにフォールバックします: {audio_file}")
-            try:
-                import winsound
-                await asyncio.to_thread(winsound.PlaySound, audio_file, winsound.SND_FILENAME | winsound.SND_ASYNC)
-                print(f"✅ AudioPlayer: winsound.PlaySound ({audio_file}) の呼び出しを試みました (非同期)。")
-            except Exception as winsound_e:
-                print(f"❌ AudioPlayer: winsound.PlaySound でもエラーが発生しました: {winsound_e}")
+            print(f"❌ Windows音声再生エラー: {e}")
     
     async def _play_macos(self, audio_file):
-        """macOS用音声再生（完全版）"""
+        """macOS用音声再生（デバイス指定は現状困難）"""
         try:
-            process = await asyncio.create_subprocess_exec("afplay", audio_file)
+            device_id = "default"
+            if self.config_manager:
+                device_id = self.config_manager.get_system_setting("audio_output_device", "default")
+
+            # afplay には直接的なデバイス指定オプションがない。
+            # 'audiodevice' (https://github.com/sourcelair/audiodevice) のような外部コマンドラインツールを使うか、
+            # Swift/Objective-C で Core Audio を操作するヘルパースクリプトを呼び出す必要がある。
+            # ここでは、もし 'audiodevice' コマンドがあればそれを使用し、なければ afplay のデフォルト出力にフォールバック。
+            cmd_list = []
+            if device_id != "default":
+                print(f"ℹ️ macOS: 指定デバイス '{device_id}' での再生を試みます。audiodeviceコマンドが必要です。")
+                # audiodevice コマンドの存在確認は省略し、直接実行を試みる。エラーならafplayへ。
+                # audiodevice output "{device_id}" # これでデフォルト出力デバイスを変更
+                # process_set_device = await asyncio.create_subprocess_exec("audiodevice", "output", device_id)
+                # await process_set_device.wait()
+                # if process_set_device.returncode != 0:
+                #     print(f"⚠️ macOS: audiodevice での出力デバイス設定に失敗。afplay のデフォルト出力を使用します。")
+                # cmd_list.extend(["afplay", audio_file])
+                #
+                # より安全なのは、afplay の -d オプション (もしあれば) や、
+                # OSレベルでデフォルトデバイスを切り替える方法だが、afplay にはそのオプションがない。
+                # Soundflowerのような仮想オーディオデバイスとルーティングを使う手もあるが複雑。
+                # 現状は、device_id が default でない場合は警告を出し、afplay のデフォルト出力で再生。
+                print(f"⚠️ macOS: 指定された音声出力デバイス '{device_id}' での再生は現在 'afplay' では直接サポートされていません。デフォルトデバイスを使用します。")
+                cmd_list = ["afplay", audio_file]
+            else:
+                cmd_list = ["afplay", audio_file]
+
+            process = await asyncio.create_subprocess_exec(*cmd_list)
             await process.wait()
+            if process.returncode != 0:
+                print(f"❌ macOS: {' '.join(cmd_list)} での再生に失敗しました。")
+            else:
+                print(f"✅ macOS: {' '.join(cmd_list)} で再生しました。")
+
+        except FileNotFoundError:
+            print(f"❌ macOS: afplay (または audiodevice) コマンドが見つかりません。")
         except Exception as e:
-            print(f"macOS音声再生エラー: {e}")
+            print(f"❌ macOS音声再生エラー: {e}")
     
     async def _play_linux(self, audio_file):
-        """Linux用音声再生（完全版）"""
+        """Linux用音声再生（デバイス指定対応）"""
         try:
-            players = ["aplay", "paplay", "play", "ffplay"]
+            device_id = "default"
+            if self.config_manager:
+                device_id = self.config_manager.get_system_setting("audio_output_device", "default")
+
+            players = ["aplay", "paplay", "play"] # ffplayはデバイス指定が複雑なので一旦除外
             
-            for player in players:
-                try:
-                    if player == "ffplay":
-                        process = await asyncio.create_subprocess_exec(
-                            player, "-nodisp", "-autoexit", audio_file,
-                            stdout=asyncio.subprocess.PIPE,
-                            stderr=asyncio.subprocess.PIPE
-                        )
+            for player_name in players:
+                cmd_list = []
+                if player_name == "aplay":
+                    if device_id != "default":
+                        cmd_list = [player_name, "-D", device_id, audio_file]
                     else:
-                        process = await asyncio.create_subprocess_exec(
-                            player, audio_file,
-                            stdout=asyncio.subprocess.PIPE,
-                            stderr=asyncio.subprocess.PIPE
-                        )
-                    
-                    await process.wait()
+                        cmd_list = [player_name, audio_file]
+                elif player_name == "paplay": # PulseAudio Player
+                    if device_id != "default":
+                        # paplay の --device オプションはシンク名またはインデックス
+                        cmd_list = [player_name, "--device", device_id, audio_file]
+                    else:
+                        cmd_list = [player_name, audio_file]
+                elif player_name == "play": # SoX
+                    # play コマンド (SoX) の場合、AUDIODEV 環境変数でデバイスを指定できる場合がある
+                    # または、-d <driver>:<device> のような形式だが、汎用性に欠ける。
+                    # ここでは AUDIODEV の設定は行わず、デフォルトで試す。
+                    if device_id != "default":
+                         print(f"⚠️ Linux: play コマンドでのデバイス '{device_id}' 指定は現在サポートされていません。デフォルトデバイスを使用します。")
+                    cmd_list = [player_name, audio_file]
+
+                if not cmd_list: continue
+
+                try:
+                    process = await asyncio.create_subprocess_exec(
+                        *cmd_list,
+                        stdout=asyncio.subprocess.PIPE,
+                        stderr=asyncio.subprocess.PIPE
+                    )
+                    stdout, stderr = await process.communicate()
                     
                     if process.returncode == 0:
+                        print(f"✅ Linux: {' '.join(cmd_list)} で再生しました。")
                         return
-                    
+                    else:
+                        print(f"ℹ️ Linux: {' '.join(cmd_list)} での再生に失敗。次のプレイヤーを試します。Stderr: {stderr.decode('utf-8', errors='ignore')}")
                 except FileNotFoundError:
+                    print(f"ℹ️ Linux: {player_name} が見つかりません。")
                     continue
             
-            print("Linux: 利用可能な音声プレイヤーが見つかりません")
+            print(f"❌ Linux: 利用可能な音声プレイヤーで {audio_file} の再生に失敗しました。")
             
         except Exception as e:
-            print(f"Linux音声再生エラー: {e}")
+            print(f"❌ Linux音声再生エラー: {e}")
 
 # 音声エンジン管理クラス v2.2（4エンジン完全対応版）
 class VoiceEngineManager:
@@ -2069,7 +2268,7 @@ class AITuberMainGUI:
         self.config = ConfigManager()
         self.character_manager = CharacterManager(self.config)
         self.voice_manager = VoiceEngineManager()
-        self.audio_player = AudioPlayer()
+        self.audio_player = AudioPlayer(config_manager=self.config) # config_managerを渡す
         
         # 状態管理
         self.is_streaming = False
@@ -2495,9 +2694,17 @@ class AITuberMainGUI:
                                            foreground="gray", wraplength=500)
         self.system_engine_info.grid(row=0, column=2, padx=10, sticky=tk.W)
         
+        # 音声出力デバイス選択
+        ttk.Label(voice_grid, text="音声出力デバイス:").grid(row=1, column=0, sticky=tk.W, pady=(10,0))
+        self.audio_output_device_var = tk.StringVar()
+        self.audio_output_device_combo = ttk.Combobox(voice_grid, textvariable=self.audio_output_device_var,
+                                                     state="readonly", width=40)
+        self.audio_output_device_combo.grid(row=1, column=1, columnspan=2, padx=10, pady=(10,0), sticky=tk.W)
+        self.populate_audio_output_devices() # ドロップダウンの初期化
+
         # フォールバック設定
         fallback_frame = ttk.Frame(voice_grid)
-        fallback_frame.grid(row=1, column=0, columnspan=3, sticky=tk.W, pady=10)
+        fallback_frame.grid(row=2, column=0, columnspan=3, sticky=tk.W, pady=10) # row を変更
         
         ttk.Label(fallback_frame, text="フォールバック有効:").pack(side=tk.LEFT)
         self.fallback_enabled_var = tk.BooleanVar(value=True)
@@ -2648,6 +2855,33 @@ class AITuberMainGUI:
         
         # ステータス更新を定期実行
         self.update_system_info()
+
+    def populate_audio_output_devices(self):
+        """音声出力デバイスのドロップダウンメニューを初期化する"""
+        try:
+            devices = self.audio_player.get_available_output_devices()
+            device_names = [device["name"] for device in devices]
+            self.audio_output_device_combo['values'] = device_names
+
+            # 設定ファイルから保存されたデバイスIDを取得
+            saved_device_id = self.config.get_system_setting("audio_output_device", "default")
+
+            # 保存されたIDに対応するデバイス名を探して設定
+            selected_device_name = "デフォルト" # デフォルト値
+            for device in devices:
+                if device["id"] == saved_device_id:
+                    selected_device_name = device["name"]
+                    break
+
+            if selected_device_name in device_names:
+                self.audio_output_device_var.set(selected_device_name)
+            elif device_names: # 保存されたものがない場合、リストの最初のものを選択
+                self.audio_output_device_var.set(device_names[0])
+
+        except Exception as e:
+            self.log(f"❌ 音声出力デバイスの読み込みに失敗: {e}")
+            self.audio_output_device_combo['values'] = ["デフォルト"]
+            self.audio_output_device_var.set("デフォルト")
     
     # quick_character_settings メソッドと open_quick_edit_dialog メソッドを削除
 
@@ -2719,6 +2953,18 @@ class AITuberMainGUI:
         # システム音声エンジン変更時の情報表示を初期化
         self.on_system_engine_changed()
         
+        # 音声出力デバイスの読み込み
+        self.populate_audio_output_devices() # populate_audio_output_devices を呼び出してUIを更新
+        saved_audio_device_name = self.audio_output_device_var.get() # populate_audio_output_devices で設定された値
+        # 対応するIDを見つける
+        devices = self.audio_player.get_available_output_devices()
+        saved_audio_device_id = "default"
+        for device in devices:
+            if device["name"] == saved_audio_device_name:
+                saved_audio_device_id = device["id"]
+                break
+        self.config.set_system_setting("audio_output_device", saved_audio_device_id) # 保存されているIDを（再）設定
+
         self.auto_save_var.set(self.config.get_system_setting("auto_save", True))
         self.debug_mode_var.set(self.config.get_system_setting("debug_mode", False))
         self.conversation_history_length_var.set(self.config.get_system_setting("conversation_history_length", 0))
@@ -2745,6 +2991,17 @@ class AITuberMainGUI:
             self.config.set_system_setting("google_ai_api_key", self.google_ai_var.get())
             self.config.set_system_setting("youtube_api_key", self.youtube_api_var.get())
             self.config.set_system_setting("voice_engine", self.voice_engine_var.get())
+
+            # 音声出力デバイス設定の保存
+            selected_audio_device_name = self.audio_output_device_var.get()
+            devices = self.audio_player.get_available_output_devices()
+            selected_device_id = "default" # デフォルト値
+            for device in devices:
+                if device["name"] == selected_audio_device_name:
+                    selected_device_id = device["id"]
+                    break
+            self.config.set_system_setting("audio_output_device", selected_device_id)
+
             self.config.set_system_setting("auto_save", self.auto_save_var.get())
             self.config.set_system_setting("debug_mode", self.debug_mode_var.get())
             self.config.set_system_setting("conversation_history_length", self.conversation_history_length_var.get())
