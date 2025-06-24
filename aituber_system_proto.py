@@ -2340,6 +2340,12 @@ class AITuberMainGUI:
         self.current_character_id = ""
         self.aituber_task = None
         self.debug_chat_history = [] # デバッグチャット用の会話履歴
+
+        # AI劇場関連の状態変数
+        self.current_script_path = None
+        self.script_data = [] # パースされた台本データ
+        self.audio_output_folder = None
+
         self.available_gemini_models = [
             "gemini-1.5-flash",
             "gemini-1.5-flash-latest",
@@ -2402,10 +2408,524 @@ class AITuberMainGUI:
         self.create_character_tab()
         self.create_debug_tab()
         self.create_settings_tab()
+        self.create_ai_theater_tab() # AI劇場タブ作成メソッド呼び出しを追加
         self.create_advanced_tab()  # 新規追加：高度な機能
         
         # ステータスバー
         self.create_status_bar()
+
+    def create_ai_theater_tab(self):
+        """AI劇場タブを作成"""
+        ai_theater_frame = ttk.Frame(self.notebook)
+        self.notebook.add(ai_theater_frame, text="🎭 AI劇場")
+
+        # 上部フレーム (ファイル読み込みと操作ボタン)
+        top_frame = ttk.Frame(ai_theater_frame)
+        top_frame.pack(fill=tk.X, padx=10, pady=5)
+
+        ttk.Button(top_frame, text="📜 CSV台本読み込み", command=self.load_csv_script).pack(side=tk.LEFT, padx=5)
+        self.loaded_csv_label = ttk.Label(top_frame, text="CSVファイル: 未読み込み")
+        self.loaded_csv_label.pack(side=tk.LEFT, padx=10)
+
+        # 台詞表示エリア (中央フレーム)
+        script_display_frame = ttk.LabelFrame(ai_theater_frame, text="台本プレビュー", padding="10")
+        script_display_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=5)
+
+        self.script_tree = ttk.Treeview(script_display_frame, columns=('line', 'action', 'talker', 'words', 'status'), show='headings')
+        self.script_tree.heading('line', text='行')
+        self.script_tree.heading('action', text='アクション')
+        self.script_tree.heading('talker', text='話者')
+        self.script_tree.heading('words', text='台詞/内容')
+        self.script_tree.heading('status', text='音声状態')
+
+        self.script_tree.column('line', width=50, anchor=tk.CENTER)
+        self.script_tree.column('action', width=100)
+        self.script_tree.column('talker', width=150)
+        self.script_tree.column('words', width=400)
+        self.script_tree.column('status', width=100, anchor=tk.CENTER)
+
+        script_tree_scroll_y = ttk.Scrollbar(script_display_frame, orient=tk.VERTICAL, command=self.script_tree.yview)
+        script_tree_scroll_x = ttk.Scrollbar(script_display_frame, orient=tk.HORIZONTAL, command=self.script_tree.xview)
+        self.script_tree.configure(yscrollcommand=script_tree_scroll_y.set, xscrollcommand=script_tree_scroll_x.set)
+
+        script_tree_scroll_y.pack(side=tk.RIGHT, fill=tk.Y)
+        script_tree_scroll_x.pack(side=tk.BOTTOM, fill=tk.X)
+        self.script_tree.pack(fill=tk.BOTH, expand=True)
+
+        # 操作ボタンフレーム (下部)
+        action_buttons_frame = ttk.Frame(ai_theater_frame)
+        action_buttons_frame.pack(fill=tk.X, padx=10, pady=10)
+
+        left_buttons_frame = ttk.Frame(action_buttons_frame)
+        left_buttons_frame.pack(side=tk.LEFT)
+
+        ttk.Button(left_buttons_frame, text="🔊 選択行の音声生成", command=self.generate_selected_line_audio).pack(side=tk.LEFT, padx=5)
+        ttk.Button(left_buttons_frame, text="🔊 全ての音声生成", command=self.generate_all_lines_audio).pack(side=tk.LEFT, padx=5)
+        ttk.Button(left_buttons_frame, text="▶️ 連続再生", command=self.play_script_sequentially).pack(side=tk.LEFT, padx=5)
+
+        right_buttons_frame = ttk.Frame(action_buttons_frame)
+        right_buttons_frame.pack(side=tk.RIGHT)
+        ttk.Button(right_buttons_frame, text="🗑️ 音声ファイル全削除", command=self.delete_all_audio_files).pack(side=tk.RIGHT, padx=5)
+
+    def load_csv_script(self):
+        # TODO: CSVファイル読み込み処理
+        self.log("AI劇場: CSV台本読み込みボタンが押されました。")
+        messagebox.showinfo("AI劇場", "CSV台本読み込み機能は現在実装中です。")
+
+    def load_csv_script(self):
+        """CSV台本ファイルを読み込み、内容をパースしてUIに表示する"""
+        filepath = filedialog.askopenfilename(
+            title="CSV台本ファイルを選択",
+            filetypes=(("CSVファイル", "*.csv"), ("すべてのファイル", "*.*"))
+        )
+        if not filepath:
+            return
+
+        self.current_script_path = filepath
+        self.script_data = []
+
+        # 音声保存フォルダの作成 (例: script_name_audio)
+        script_filename = Path(filepath).stem
+        self.audio_output_folder = Path(filepath).parent / f"{script_filename}_audio"
+        try:
+            self.audio_output_folder.mkdir(parents=True, exist_ok=True)
+            self.log(f"AI劇場: 音声保存フォルダを作成/確認しました: {self.audio_output_folder}")
+        except Exception as e:
+            self.log(f"AI劇場: 音声保存フォルダの作成に失敗しました: {e}")
+            messagebox.showerror("エラー", f"音声保存フォルダの作成に失敗しました: {e}")
+            self.current_script_path = None
+            self.audio_output_folder = None
+            return
+
+        self.loaded_csv_label.config(text=f"CSVファイル: {Path(filepath).name}")
+        self.script_tree.delete(*self.script_tree.get_children()) # 古い内容をクリア
+
+        try:
+            with open(filepath, 'r', encoding='utf-8') as csvfile:
+                reader = csv.DictReader(csvfile)
+                if reader.fieldnames != ['action', 'talker', 'words']:
+                    messagebox.showerror("CSVフォーマットエラー", "CSVのヘッダーが不正です。\n期待されるヘッダー: action,talker,words")
+                    self.log(f"AI劇場: CSVフォーマットエラー。ヘッダー: {reader.fieldnames}")
+                    self.current_script_path = None
+                    self.audio_output_folder = None
+                    self.loaded_csv_label.config(text="CSVファイル: 未読み込み")
+                    return
+
+                line_num = 1
+                for row in reader:
+                    self.script_data.append({
+                        'line': line_num,
+                        'action': row['action'],
+                        'talker': row['talker'],
+                        'words': row['words'],
+                        'status': '未生成' # 初期ステータス
+                    })
+                    self.script_tree.insert('', 'end', values=(
+                        line_num, row['action'], row['talker'], row['words'], '未生成'
+                    ))
+                    line_num += 1
+            self.log(f"AI劇場: CSVファイル '{filepath}' を読み込みました。全{len(self.script_data)}行。")
+        except FileNotFoundError:
+            messagebox.showerror("エラー", f"ファイルが見つかりません: {filepath}")
+            self.log(f"AI劇場: ファイルが見つかりません: {filepath}")
+            self.current_script_path = None
+            self.audio_output_folder = None
+            self.loaded_csv_label.config(text="CSVファイル: 未読み込み")
+        except Exception as e:
+            messagebox.showerror("CSV読み込みエラー", f"CSVファイルの読み込み中にエラーが発生しました: {e}")
+            self.log(f"AI劇場: CSV読み込みエラー: {e}")
+            self.current_script_path = None
+            self.audio_output_folder = None
+            self.loaded_csv_label.config(text="CSVファイル: 未読み込み")
+
+    def _get_audio_filename(self, line_number: int) -> str:
+        """指定された行番号に対する音声ファイル名を生成する (例: 000001.wav)"""
+        if not self.audio_output_folder:
+            # この状況は通常発生しないはずだが、念のため
+            self.log("AI劇場: エラー - 音声出力フォルダが設定されていません。")
+            return "error.wav"
+        return self.audio_output_folder / f"{line_number:06d}.wav"
+
+    async def _synthesize_script_line(self, line_data: dict) -> bool:
+        """指定された一行の台本データに基づいて音声ファイルを生成する"""
+        line_num = line_data['line']
+        action = line_data['action']
+        talker = line_data['talker']
+        words = line_data['words']
+        output_wav_path = self._get_audio_filename(line_num)
+
+        self.log(f"AI劇場: 音声生成開始 - 行{line_num}, アクション: {action}, 話者: {talker}, 内容: {words[:20]}...")
+
+        try:
+            if action == "talk" or action == "narration":
+                text_to_speak = words
+                char_id_to_use = None
+
+                # 話者を特定
+                all_characters = self.character_manager.get_all_characters()
+                found_char = False
+                for char_id, char_config in all_characters.items():
+                    if char_config.get('name') == talker:
+                        char_id_to_use = char_id
+                        found_char = True
+                        self.log(f"AI劇場: 話者 '{talker}' をキャラクターID '{char_id}' にマッピングしました。")
+                        break
+
+                if not found_char:
+                    if self.current_character_id: # メイン画面のアクティブキャラクター
+                        char_id_to_use = self.current_character_id
+                        active_char_name = self.config.get_character(self.current_character_id).get('name', '不明')
+                        self.log(f"AI劇場: 話者 '{talker}' がキャラクター一覧に見つかりません。アクティブキャラクター '{active_char_name}' (ID: {char_id_to_use}) を使用します。")
+                    else:
+                        self.log(f"AI劇場: 話者 '{talker}' もアクティブキャラクターも見つかりません。音声生成をスキップします。")
+                        messagebox.showwarning("音声生成エラー", f"話者 '{talker}' に対応するキャラクターが見つからず、\nまた、メイン画面でアクティブなキャラクターも選択されていません。")
+                        return False
+
+                char_settings = self.config.get_character(char_id_to_use)
+                if not char_settings:
+                     self.log(f"AI劇場: キャラクターID '{char_id_to_use}' の設定が見つかりません。")
+                     return False
+
+                voice_settings = char_settings.get('voice_settings', {})
+                engine = voice_settings.get('engine', self.config.get_system_setting("voice_engine", "google_ai_studio_new"))
+                model = voice_settings.get('model', 'puck') # Google AI Studio のデフォルト的なもの
+                speed = voice_settings.get('speed', 1.0)
+
+                # Google AI Studio APIキーの取得
+                google_api_key = self.config.get_system_setting("google_ai_api_key")
+
+                # 実際に使用するエンジンインスタンスを取得
+                voice_engine_instance = self.voice_manager.engines.get(engine)
+                if not voice_engine_instance:
+                    self.log(f"AI劇場: 指定された音声エンジン '{engine}' が見つかりません。フォールバックを試みます。")
+                    # フォールバックロジック (synthesize_with_fallback を直接使うか、ここで代替エンジンを選択)
+                    # ここでは synthesize_with_fallback に任せる
+                    audio_files = await self.voice_manager.synthesize_with_fallback(
+                        text_to_speak, model, speed, preferred_engine=engine, api_key=google_api_key
+                    )
+                else:
+                     # APIキーを渡す必要があるか確認
+                    if "google_ai_studio" in engine:
+                        audio_files = await voice_engine_instance.synthesize_speech(text_to_speak, model, speed, api_key=google_api_key)
+                    else:
+                        audio_files = await voice_engine_instance.synthesize_speech(text_to_speak, model, speed)
+
+                if audio_files and os.path.exists(audio_files[0]):
+                    # 生成された一時ファイルを指定のパスに移動/コピー
+                    # 既存のファイルを上書きするために shutil.move を使用
+                    import shutil
+                    shutil.move(audio_files[0], output_wav_path)
+                    self.log(f"AI劇場: 音声ファイル生成成功: {output_wav_path}")
+                    return True
+                else:
+                    self.log(f"AI劇場: 音声ファイル生成失敗 (ファイルなし): 行{line_num}")
+                    return False
+
+            elif action == "wait":
+                try:
+                    duration_seconds = float(words)
+                    if duration_seconds <= 0:
+                        self.log(f"AI劇場: waitアクションの秒数が不正です: {words}。0秒として扱います。")
+                        duration_seconds = 0
+
+                    # 無音WAVファイル作成 (24kHz, 16bit, mono を想定)
+                    framerate = 24000
+                    channels = 1
+                    sampwidth = 2 # 16-bit
+                    num_frames = int(framerate * duration_seconds)
+                    silence = b'\x00\x00' * num_frames # 16-bit zero samples
+
+                    with wave.open(str(output_wav_path), 'wb') as wf:
+                        wf.setnchannels(channels)
+                        wf.setsampwidth(sampwidth)
+                        wf.setframerate(framerate)
+                        wf.writeframes(silence)
+                    self.log(f"AI劇場: 無音ファイル作成成功 ({duration_seconds}秒): {output_wav_path}")
+                    return True
+                except ValueError:
+                    self.log(f"AI劇場: waitアクションの秒数指定が不正です: {words}")
+                    messagebox.showerror("書式エラー", f"waitアクションの秒数指定が不正です: {words}\n行 {line_num}")
+                    return False
+            else:
+                self.log(f"AI劇場: 未知のアクションタイプです: {action}。行{line_num}")
+                return False # 未知のアクションは失敗扱い
+
+        except Exception as e:
+            self.log(f"AI劇場: 音声生成中にエラーが発生しました (行{line_num}): {e}")
+            import traceback
+            self.log(f"詳細トレース: {traceback.format_exc()}")
+            return False
+
+    def _update_script_tree_status(self, line_num: int, status: str):
+        """Treeviewの指定行のステータスを更新する"""
+        for item_id in self.script_tree.get_children():
+            item_values = self.script_tree.item(item_id, 'values')
+            if item_values and int(item_values[0]) == line_num:
+                # 現在の値を保持しつつ、ステータスのみ更新
+                new_values = list(item_values)
+                new_values[4] = status
+                self.script_tree.item(item_id, values=tuple(new_values))
+                break
+
+    def generate_selected_line_audio(self):
+        """選択されている行の音声を生成する"""
+        selected_items = self.script_tree.selection()
+        if not selected_items:
+            messagebox.showinfo("AI劇場", "台本プレビューから音声生成する行を選択してください。")
+            return
+
+        if not self.current_script_path or not self.script_data:
+            messagebox.showerror("エラー", "先にCSV台本を読み込んでください。")
+            return
+
+        selected_item_id = selected_items[0]
+        selected_values = self.script_tree.item(selected_item_id, 'values')
+
+        try:
+            line_num_to_generate = int(selected_values[0])
+        except (TypeError, IndexError, ValueError):
+            messagebox.showerror("エラー", "選択された行の情報を取得できませんでした。")
+            return
+
+        line_data_to_synthesize = next((item for item in self.script_data if item['line'] == line_num_to_generate), None)
+
+        if not line_data_to_synthesize:
+            messagebox.showerror("エラー", f"行番号 {line_num_to_generate} のデータが見つかりません。")
+            return
+
+        self._update_script_tree_status(line_num_to_generate, "生成中...")
+
+        def run_synthesis():
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+            try:
+                success = loop.run_until_complete(self._synthesize_script_line(line_data_to_synthesize))
+                final_status = "成功" if success else "失敗"
+                # TreeViewの更新はメインスレッドで行う
+                self.root.after(0, self._update_script_tree_status, line_num_to_generate, final_status)
+                if success:
+                    self.log(f"AI劇場: 行 {line_num_to_generate} の音声生成が{final_status}しました。")
+                else:
+                    messagebox.showerror("音声生成エラー", f"行 {line_num_to_generate} の音声生成に失敗しました。詳細はログを確認してください。")
+            except Exception as e:
+                self.log(f"AI劇場: generate_selected_line_audio スレッド内エラー: {e}")
+                self.root.after(0, self._update_script_tree_status, line_num_to_generate, "エラー")
+                messagebox.showerror("音声生成エラー", f"行 {line_num_to_generate} の音声生成中に予期せぬエラーが発生しました: {e}")
+            finally:
+                loop.close()
+
+        threading.Thread(target=run_synthesis, daemon=True).start()
+
+
+    def generate_all_lines_audio(self):
+        """台本全体の音声を一括生成する"""
+        if not self.current_script_path or not self.script_data:
+            messagebox.showerror("エラー", "先にCSV台本を読み込んでください。")
+            return
+
+        if not messagebox.askyesno("一括音声生成確認", f"台本全体の音声ファイル（全{len(self.script_data)}行）を生成しますか？\n時間がかかる場合があります。"):
+            return
+
+        self.log("AI劇場: 全ての音声ファイルの一括生成を開始します...")
+
+        # プログレスバーの準備 (オプション)
+        progress_popup = tk.Toplevel(self.root)
+        progress_popup.title("音声生成中...")
+        progress_popup.geometry("300x100")
+        progress_popup.transient(self.root)
+        progress_popup.grab_set()
+
+        ttk.Label(progress_popup, text="音声ファイルを生成しています...").pack(pady=10)
+        progress_var = tk.DoubleVar()
+        progressbar = ttk.Progressbar(progress_popup, variable=progress_var, maximum=len(self.script_data), length=280)
+        progressbar.pack(pady=10)
+
+        def run_batch_synthesis():
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+            success_count = 0
+            fail_count = 0
+            try:
+                for i, line_data in enumerate(self.script_data):
+                    line_num = line_data['line']
+                    self.root.after(0, self._update_script_tree_status, line_num, "生成中...")
+
+                    success = loop.run_until_complete(self._synthesize_script_line(line_data))
+                    final_status = "成功" if success else "失敗"
+                    self.root.after(0, self._update_script_tree_status, line_num, final_status)
+
+                    if success:
+                        success_count += 1
+                    else:
+                        fail_count += 1
+
+                    # プログレスバー更新
+                    progress_var.set(i + 1)
+                    progress_popup.update_idletasks() # UIを強制更新
+
+                    # ユーザーによるキャンセルチェック (もし実装する場合)
+                    # if self.cancel_batch_generation_flag: break
+
+                self.log(f"AI劇場: 一括音声生成完了。成功: {success_count}, 失敗: {fail_count}")
+                if fail_count > 0:
+                    messagebox.showwarning("一括音声生成完了", f"一部の音声生成に失敗しました。\n成功: {success_count}件, 失敗: {fail_count}件\n詳細はログを確認してください。")
+                else:
+                    messagebox.showinfo("一括音声生成完了", f"全ての音声生成が完了しました。\n成功: {success_count}件")
+
+            except Exception as e:
+                self.log(f"AI劇場: 一括音声生成中にエラー: {e}")
+                messagebox.showerror("一括音声生成エラー", f"一括音声生成中にエラーが発生しました: {e}")
+            finally:
+                loop.close()
+                progress_popup.destroy()
+
+        threading.Thread(target=run_batch_synthesis, daemon=True).start()
+
+
+    def play_script_sequentially(self):
+        """台本を一行ずつ順次再生する。音声がない場合は生成してから再生する。"""
+        if not self.current_script_path or not self.script_data:
+            messagebox.showerror("エラー", "先にCSV台本を読み込んでください。")
+            return
+
+        self.log("AI劇場: 連続再生を開始します...")
+
+        # 再生中の重複実行を防ぐためのフラグ (もし必要なら)
+        # if hasattr(self, 'is_playing_script') and self.is_playing_script:
+        #     messagebox.showwarning("再生中", "既に連続再生が実行中です。")
+        #     return
+        # self.is_playing_script = True
+
+        def run_sequential_play():
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+            try:
+                for i, line_data in enumerate(self.script_data):
+                    line_num = line_data['line']
+                    self.log(f"AI劇場: 行 {line_num} を再生準備中...")
+                    self.root.after(0, self._update_script_tree_status, line_num, "再生準備") # UI更新
+
+                    audio_file_path = self._get_audio_filename(line_num)
+
+                    if not os.path.exists(audio_file_path):
+                        self.log(f"AI劇場: 音声ファイルが見つかりません: {audio_file_path}。生成します...")
+                        self.root.after(0, self._update_script_tree_status, line_num, "生成中...")
+                        success = loop.run_until_complete(self._synthesize_script_line(line_data))
+                        if not success:
+                            self.log(f"AI劇場: 行 {line_num} の音声生成に失敗したため、再生をスキップします。")
+                            self.root.after(0, self._update_script_tree_status, line_num, "生成失敗")
+                            # オプション: エラー発生時に連続再生を中止するかどうか
+                            # messagebox.showerror("再生エラー", f"行 {line_num} の音声生成に失敗しました。連続再生を中止します。")
+                            # break
+                            continue # 次の行へ
+                        self.root.after(0, self._update_script_tree_status, line_num, "生成完了")
+
+                    if os.path.exists(audio_file_path):
+                        self.log(f"AI劇場: 音声ファイル {audio_file_path} を再生します。")
+                        self.root.after(0, self._update_script_tree_status, line_num, "再生中...")
+
+                        # AudioPlayer.play_audio_files はリストを期待するのでリストで渡す
+                        # play_audio_files は内部で一時ファイルを削除するため、ここでは永続ファイルを直接再生するメソッドが必要。
+                        # AudioPlayer に play_single_persistent_file のようなメソッドを追加するか、
+                        # ここで play_audio_file (単数形) を直接呼び出す。
+                        # AudioPlayer.play_audio_file は await 可能である想定。
+
+                        # play_audio_files は再生後にファイルを削除してしまうため、ここでは使用しない。
+                        # 代わりに、play_audio_file を使用するが、これは現在 AudioPlayer の内部メソッド (_play_windows など)
+                        # を直接呼び出す形になっており、トップレベルの await可能な play_audio_file が必要。
+                        # 今回は、AudioPlayer の play_audio_files を呼び出すが、
+                        # 再生後にファイルが消えないように、一時的なコピーを作成してそれを再生させるか、
+                        # AudioPlayer 側を修正する。
+                        # ここでは、AudioPlayer.play_audio_file が存在し、単一ファイルを再生し削除しないと仮定。
+                        # もし play_audio_file がなければ、play_audio_files に単一要素リストを渡す。
+                        # ただし、play_audio_filesはファイルを削除する。
+                        # なので、ここでは _synthesize_script_line が作ったファイルを直接再生する。
+
+                        # AudioPlayer の play_audio_file を直接呼び出す
+                        # このメソッドは、self.audio_player.play_audio_file(str(audio_file_path)) のように使える必要がある。
+                        # 現在の AudioPlayer の play_audio_file は内部的に _play_windows などを呼び出す。
+                        loop.run_until_complete(self.audio_player.play_audio_file(str(audio_file_path)))
+
+                        self.log(f"AI劇場: 行 {line_num} の再生完了。")
+                        self.root.after(0, self._update_script_tree_status, line_num, "再生済")
+                    else:
+                        self.log(f"AI劇場: 再生試行後も音声ファイルが見つかりません: {audio_file_path}")
+                        self.root.after(0, self._update_script_tree_status, line_num, "ファイルなし")
+
+                    # 各行の再生後に短い待機を入れる（任意）
+                    # await asyncio.sleep(0.1)
+
+                self.log("AI劇場: 全ての行の連続再生が完了しました。")
+                messagebox.showinfo("連続再生完了", "台本の連続再生が完了しました。")
+
+            except Exception as e:
+                self.log(f"AI劇場: 連続再生中にエラーが発生しました: {e}")
+                import traceback
+                self.log(f"詳細トレース: {traceback.format_exc()}")
+                messagebox.showerror("連続再生エラー", f"連続再生中にエラーが発生しました: {e}")
+            finally:
+                # self.is_playing_script = False # 再生中フラグをリセット
+                loop.close()
+
+        threading.Thread(target=run_sequential_play, daemon=True).start()
+
+    def delete_all_audio_files(self):
+        """現在読み込まれている台本の音声ファイルを全て削除する"""
+        if not self.current_script_path or not self.audio_output_folder:
+            messagebox.showerror("エラー", "先にCSV台本を読み込んでください。音声フォルダが特定できません。")
+            return
+
+        if not os.path.exists(self.audio_output_folder):
+            messagebox.showinfo("情報", f"音声フォルダが見つかりません。削除するファイルはありません。\nフォルダパス: {self.audio_output_folder}")
+            self.log(f"AI劇場: 音声フォルダ {self.audio_output_folder} が存在しないため、削除処理をスキップしました。")
+            # Treeviewのステータスも更新しておく
+            for item_id in self.script_tree.get_children():
+                values = list(self.script_tree.item(item_id, 'values'))
+                values[4] = "未生成"
+                self.script_tree.item(item_id, values=tuple(values))
+            return
+
+        if not messagebox.askyesno("音声ファイル全削除確認",
+                                   f"本当に音声フォルダ内の全ての音声ファイル（.wav）を削除しますか？\nフォルダ: {self.audio_output_folder}\nこの操作は取り消せません。"):
+            return
+
+        self.log(f"AI劇場: 音声ファイル全削除処理を開始します。対象フォルダ: {self.audio_output_folder}")
+        deleted_count = 0
+        failed_count = 0
+        try:
+            for filename in os.listdir(self.audio_output_folder):
+                if filename.lower().endswith(".wav"):
+                    file_path_to_delete = self.audio_output_folder / filename
+                    try:
+                        os.remove(file_path_to_delete)
+                        self.log(f"AI劇場: 削除しました: {file_path_to_delete}")
+                        deleted_count += 1
+                    except Exception as e:
+                        self.log(f"AI劇場: ファイル削除エラー ({file_path_to_delete}): {e}")
+                        failed_count += 1
+
+            if failed_count > 0:
+                messagebox.showwarning("一部削除失敗", f"{deleted_count}個の音声ファイルを削除しましたが、{failed_count}個のファイルの削除に失敗しました。詳細はログを確認してください。")
+            else:
+                messagebox.showinfo("削除完了", f"{deleted_count}個の音声ファイルを削除しました。")
+            self.log(f"AI劇場: 音声ファイル削除完了。削除: {deleted_count}件, 失敗: {failed_count}件")
+
+            # TreeViewのステータスを全て「未生成」に更新
+            if self.script_data: # script_data がある場合のみ更新
+                for line_data in self.script_data:
+                    self._update_script_tree_status(line_data['line'], "未生成")
+            else: # script_dataがない（＝CSVが読み込まれていないがフォルダだけ残っているような稀なケース）
+                  # または、script_treeが空の場合
+                for item_id in self.script_tree.get_children():
+                    values = list(self.script_tree.item(item_id, 'values'))
+                    if len(values) > 4 : # valuesの要素数をチェック
+                        values[4] = "未生成"
+                        self.script_tree.item(item_id, values=tuple(values))
+
+
+        except Exception as e:
+            self.log(f"AI劇場: 音声ファイル全削除処理中にエラー: {e}")
+            messagebox.showerror("削除エラー", f"音声ファイルの削除中にエラーが発生しました: {e}")
     
     def create_main_tab(self):
         """メインタブ - 配信制御（完全版）"""
@@ -3863,6 +4383,18 @@ class AITuberMainGUI:
 • まずは「元気系」「ずんだもん系」キャラクターから開始
 • 音声エンジンは「google_ai_studio_new」、「avis_speech」、「voicevox」推奨
 • 問題があれば自動で次のエンジンにフォールバック
+
+🎭【AI劇場機能】
+1. 「AI劇場」タブを開きます。
+2. 「CSV台本読み込み」ボタンで、所定のフォーマットのCSVファイルを読み込みます。
+   (フォーマット詳細は CSVScriptDefinitions.md を参照)
+3. 読み込まれた台本がプレビューに表示されます。
+4. 「選択行の音声生成」または「全ての音声生成」で、台詞に対応する音声ファイルを作成します。
+   音声ファイルはCSVファイルと同じ場所に `[CSVファイル名]_audio` というフォルダが作成され、その中に保存されます。
+5. 「連続再生」で台本を順次再生します。音声ファイルがない場合は自動で生成してから再生します。
+6. 「音声ファイル全削除」で、現在読み込んでいる台本に対応する音声フォルダ内の音声ファイルを全て削除します。
+7. 話者名（talker）はキャラクター管理で登録されたキャラクター名と照合されます。ナレーターも同様です。
+   該当がない場合はメイン画面のアクティブキャラクターの声が使用されます。
 
 【エンジン起動確認】
 • Google AI Studio新音声: Google AI Studio APIキー設定
