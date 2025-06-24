@@ -44,6 +44,7 @@ import base64
 import wave # wave モジュールをインポート
 import re # 正規表現モジュールをインポート
 import json # JSONモジュールをインポート (macOSデバイス取得で使用)
+import csv
 
 # 設定管理クラス（完全版）
 class ConfigManager:
