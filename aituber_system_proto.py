@@ -697,14 +697,21 @@ class SystemTTSAPI(VoiceEngineBase):
         
         if self.system == "Windows":
             self.voice_models = [
-                "Microsoft Ayumi Desktop",     # 日本語女性（標準）
-                "Microsoft Ichiro Desktop",    # 日本語男性
-                "Microsoft Haruka Desktop",    # 日本語女性（若い）
-                "Microsoft Zira Desktop",      # 英語女性
-                "Microsoft David Desktop",     # 英語男性
-                "Microsoft Hazel Desktop"      # 英語女性（イギリス）
+                "Haruka (SAPI5)",
+                "Zira (SAPI5)",
+                "Ayumi (OneCore)",
+                "Ichiro (OneCore)",
+                "Haruka (OneCore)",
+                "Sayaka (OneCore)",
+                "Zira (OneCore)",
+                "David (OneCore)",
+                "Mark (OneCore)",
+                "Jenny (OneCore)",
+                "Guy (OneCore)",
+                # Keep other existing non-SAPI5/non-OneCore desktop voices if any were intended to be kept
+                # For now, assuming the request implies these are the primary voices to be listed for Windows System TTS
             ]
-            self.default_voice = "Microsoft Ayumi Desktop"
+            self.default_voice = "Haruka (SAPI5)" # Default remains Haruka SAPI5
         elif self.system == "Darwin":  # macOS
             self.voice_models = [
                 "Kyoko",        # 日本語女性
@@ -770,17 +777,48 @@ class SystemTTSAPI(VoiceEngineBase):
             return []
     
     async def _windows_tts(self, text, output_file, voice_model, speed):
-        """Windows用TTS実装 v2.2（完全版）"""
+        """Windows用TTS実装 v2.2（SAPI5/OneCore対応）"""
         try:
-            voice_name = voice_model
-            if "Desktop" not in voice_name and "Microsoft" not in voice_name:
-                voice_mapping = {
-                    "Ayumi": "Microsoft Ayumi Desktop",
-                    "Ichiro": "Microsoft Ichiro Desktop",
+            ps_voice_name = voice_model # Initialize with the input voice_model
+
+            if "(SAPI5)" in voice_model:
+                base_name = voice_model.replace(" (SAPI5)", "").strip()
+                sapi5_mapping = {
                     "Haruka": "Microsoft Haruka Desktop",
-                    "Zira": "Microsoft Zira Desktop"
+                    "Zira": "Microsoft Zira Desktop",
                 }
-                voice_name = voice_mapping.get(voice_model, "Microsoft Ayumi Desktop")
+                ps_voice_name = sapi5_mapping.get(base_name, f"Microsoft {base_name} Desktop")
+            elif "(OneCore)" in voice_model:
+                base_name = voice_model.replace(" (OneCore)", "").strip()
+                onecore_mapping = {
+                    "Ayumi": "Microsoft Ayumi OneCore",
+                    "Ichiro": "Microsoft Ichiro OneCore",
+                    "Haruka": "Microsoft Haruka OneCore",
+                    "Sayaka": "Microsoft Sayaka OneCore",
+                    "Zira": "Microsoft Zira OneCore",
+                    "David": "Microsoft David OneCore",
+                    "Mark": "Microsoft Mark OneCore",
+                    "Jenny": "Microsoft Jenny OneCore",
+                    "Guy": "Microsoft Guy OneCore",
+                }
+                ps_voice_name = onecore_mapping.get(base_name, f"Microsoft {base_name} OneCore")
+            elif "Desktop" not in voice_model and "Microsoft" not in voice_model:
+                # This block is for existing short names if they don't have SAPI5/OneCore suffix
+                # and are not already full names.
+                default_desktop_mapping = {
+                    "Ayumi": "Microsoft Ayumi Desktop", # Should be Ayumi (OneCore) or Ayumi (SAPI5) if used
+                    "Ichiro": "Microsoft Ichiro Desktop",# Should be Ichiro (OneCore) or Ichiro (SAPI5) if used
+                    "David": "Microsoft David Desktop",  # Should be David (OneCore) or David (SAPI5) if used
+                    "Hazel": "Microsoft Hazel Desktop",
+                    # Haruka and Zira are primarily handled by (SAPI5) or (OneCore) suffixed versions
+                }
+                # Only apply this mapping if voice_model is a simple name like "Ayumi"
+                # and not something already processed or a full name.
+                if voice_model in default_desktop_mapping:
+                     ps_voice_name = default_desktop_mapping.get(voice_model)
+            # If voice_model was already a full name like "Microsoft Haruka Desktop",
+            # it would have passed through the above conditions and ps_voice_name remains voice_model.
+            # voice_name_for_ps = ps_voice_name # This line is removed. ps_voice_name is used directly.
             
             rate_value = max(-10, min(10, int((speed - 1.0) * 5)))
             
@@ -789,11 +827,32 @@ Add-Type -AssemblyName System.speech
 $speak = New-Object System.Speech.Synthesis.SpeechSynthesizer
 try {{
     $voices = $speak.GetInstalledVoices()
-    $targetVoice = $voices | Where-Object {{ $_.VoiceInfo.Name -eq "{voice_name}" }}
+    # Write-Host "Attempting to select voice with ps_voice_name: {ps_voice_name}" # Debug line removed
+    $targetVoice = $voices | Where-Object {{ $_.VoiceInfo.Name -eq "{ps_voice_name}" }}
     if ($targetVoice) {{
-        $speak.SelectVoice("{voice_name}")
+        $speak.SelectVoice("{ps_voice_name}")
+        # Write-Host "Successfully selected voice: {ps_voice_name}" # Debug line removed
     }} else {{
-        Write-Host "Voice not found: {voice_name}, using default"
+        # Write-Host "Exact match for '{ps_voice_name}' not found. Trying fallback mechanisms..." # Debug line removed
+        $baseNameToSearch = ""
+        if ("{ps_voice_name}".Contains("Microsoft") -and "{ps_voice_name}".Split(" ").Length -gt 1) {{
+             $baseNameToSearch = "{ps_voice_name}".Split(" ")[1]
+        }} else {{
+             $baseNameToSearch = "{ps_voice_name}".Split(" (")[0]
+        }}
+
+        if ($baseNameToSearch -ne "") {{
+            # Write-Host "Attempting partial match with base name: $baseNameToSearch" # Debug line removed
+            $partialMatch = $voices | Where-Object {{ $_.VoiceInfo.Name -like "*$baseNameToSearch*" }} | Select-Object -First 1
+            if ($partialMatch) {{
+                $speak.SelectVoice($partialMatch.VoiceInfo.Name)
+                # Write-Host "Fallback: Successfully selected voice by partial match: $($partialMatch.VoiceInfo.Name)" # Debug line removed
+            }} else {{
+                # Write-Host "Fallback: No partial match found for '$baseNameToSearch'. System will use its default voice." # Debug line removed
+            }}
+        }} else {{
+            # Write-Host "Could not determine a base name for search from '{ps_voice_name}'. System will use its default voice." # Debug line removed
+        }}
     }}
     $speak.Rate = {rate_value}
     $speak.SetOutputToWaveFile("{output_file}")
@@ -2038,13 +2097,18 @@ class CharacterEditDialog:
             info_text = "🎤 定番キャラクター・ずんだもん等・安定動作・豊富な感情表現"
         else:  # system_tts
             system_tts = SystemTTSAPI()
-            voices = system_tts.get_available_voices()
-            default_voice = voices[0] if voices else "デフォルト"
-            info_text = "💻 OS標準TTS・完全無料・インターネット不要・安定動作"
+            voices = system_tts.get_available_voices() # Should now include SAPI5 and OneCore voices
+            default_voice = "Haruka (SAPI5)" if "Haruka (SAPI5)" in voices else (voices[0] if voices else "デフォルト")
+            info_text = "💻 OS標準TTS (SAPI5 & OneCore対応)・完全無料・インターネット不要・安定動作"
         
         # 音声モデルリスト更新
         self.voice_combo['values'] = voices
         if not self.is_edit_mode or self.voice_var.get() not in voices:
+            self.voice_var.set(default_voice)
+        elif self.is_edit_mode and self.voice_var.get() in voices:
+            # If in edit mode and the current voice is valid, keep it.
+            pass # voice_var is already correctly set or will be by load_existing_data
+        else: # Fallback if the current voice_var value is somehow invalid after list update
             self.voice_var.set(default_voice)
         
         # エンジン情報表示
