@@ -2346,6 +2346,8 @@ class AITuberMainGUI:
         self.current_script_path = None
         self.script_data = [] # パースされた台本データ
         self.audio_output_folder = None
+        self.is_playing_script = False  # 連続再生中フラグ
+        self.stop_requested = False     # 連続再生停止リクエストフラグ
 
         self.available_gemini_models = [
             "gemini-1.5-flash",
@@ -2463,6 +2465,7 @@ class AITuberMainGUI:
         ttk.Button(left_buttons_frame, text="🔊 選択行の音声生成", command=self.generate_selected_line_audio).pack(side=tk.LEFT, padx=5)
         ttk.Button(left_buttons_frame, text="🔊 全ての音声生成", command=self.generate_all_lines_audio).pack(side=tk.LEFT, padx=5)
         ttk.Button(left_buttons_frame, text="▶️ 連続再生", command=self.play_script_sequentially).pack(side=tk.LEFT, padx=5)
+        ttk.Button(left_buttons_frame, text="⏹️ 連続再生停止", command=self.stop_sequential_play).pack(side=tk.LEFT, padx=5)
 
         right_buttons_frame = ttk.Frame(action_buttons_frame)
         right_buttons_frame.pack(side=tk.RIGHT)
@@ -2791,17 +2794,31 @@ class AITuberMainGUI:
 
         self.log("AI劇場: 連続再生を開始します...")
 
-        # 再生中の重複実行を防ぐためのフラグ (もし必要なら)
-        # if hasattr(self, 'is_playing_script') and self.is_playing_script:
-        #     messagebox.showwarning("再生中", "既に連続再生が実行中です。")
-        #     return
-        # self.is_playing_script = True
+        if self.is_playing_script:
+            messagebox.showwarning("再生中", "既に連続再生が実行中です。")
+            self.log("AI劇場: 連続再生の二重起動が試みられました。")
+            return
+
+        self.is_playing_script = True
+        self.stop_requested = False # 停止リクエストフラグをリセット
 
         def run_sequential_play():
             loop = asyncio.new_event_loop()
             asyncio.set_event_loop(loop)
             try:
                 for i, line_data in enumerate(self.script_data):
+                    if self.stop_requested:
+                        self.log("AI劇場: 連続再生がユーザーによって停止されました。")
+                        # messagebox.showinfo はメインスレッドから呼び出すべきなので、ここではログのみ
+                        # UI上のメッセージは stop_sequential_play メソッド側か、メインスレッドのafterで出す
+                        current_line_num_for_status_update = line_data['line']
+                        # 再生中の行だけでなく、それ以降の行もステータスを更新する方が自然かもしれない
+                        # ここでは現在の行のみ「停止」とし、残りはそのままか「未再生」とする
+                        self.root.after(0, self._update_script_tree_status, current_line_num_for_status_update, "停止済")
+                        # 停止後に再生完了メッセージが表示されるのを防ぐため、ここで完了メッセージを出す
+                        self.root.after(0, lambda: messagebox.showinfo("連続再生停止", "連続再生を停止しました。"))
+                        break
+
                     line_num = line_data['line']
                     self.log(f"AI劇場: 行 {line_num} を再生準備中...")
                     self.root.after(0, self._update_script_tree_status, line_num, "再生準備") # UI更新
@@ -2863,9 +2880,16 @@ class AITuberMainGUI:
                 self.log(f"AI劇場: 連続再生中にエラーが発生しました: {e}")
                 import traceback
                 self.log(f"詳細トレース: {traceback.format_exc()}")
-                messagebox.showerror("連続再生エラー", f"連続再生中にエラーが発生しました: {e}")
+                # messagebox.showerror("連続再生エラー", f"連続再生中にエラーが発生しました: {e}") # スレッド内からは避ける
+                self.root.after(0, lambda: messagebox.showerror("連続再生エラー", f"連続再生中にエラーが発生しました: {e}"))
             finally:
-                # self.is_playing_script = False # 再生中フラグをリセット
+                self.is_playing_script = False # 再生中フラグをリセット
+                # self.stop_requested はここでリセットせず、次の再生開始時にリセットする
+                if not self.stop_requested : # ユーザーによる停止でない場合のみ完了メッセージ
+                    self.log("AI劇場: 全ての行の連続再生が正常に完了しました。")
+                    self.root.after(0, lambda: messagebox.showinfo("連続再生完了", "台本の連続再生が完了しました。"))
+                # stop_requested が True の場合は、既に停止メッセージが表示されているはずなので、ここでは何もしない
+                self.stop_requested = False # finallyブロックの最後でリセット
                 loop.close()
 
         threading.Thread(target=run_sequential_play, daemon=True).start()
@@ -2927,6 +2951,20 @@ class AITuberMainGUI:
         except Exception as e:
             self.log(f"AI劇場: 音声ファイル全削除処理中にエラー: {e}")
             messagebox.showerror("削除エラー", f"音声ファイルの削除中にエラーが発生しました: {e}")
+
+    def stop_sequential_play(self):
+        """AI劇場の連続再生を停止する"""
+        if self.is_playing_script:
+            if not self.stop_requested: # まだ停止リクエストが出ていない場合のみ
+                self.stop_requested = True
+                self.log("AI劇場: 連続再生の停止ボタンが押されました。停止を試みます。")
+                # UIへのフィードバックは play_script_sequentially 内のループで停止を検知した際に行う
+            else:
+                self.log("AI劇場: 連続再生は既に停止処理中です。")
+                messagebox.showinfo("情報", "連続再生は既に停止処理中です。")
+        else:
+            self.log("AI劇場: 停止ボタンが押されましたが、連続再生は実行されていません。")
+            messagebox.showinfo("情報", "連続再生は実行されていません。")
     
     def create_main_tab(self):
         """メインタブ - 配信制御（完全版）"""
