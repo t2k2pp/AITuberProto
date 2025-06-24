@@ -2517,15 +2517,22 @@ class AITuberMainGUI:
 
                 line_num = 1
                 for row in reader:
+                    # 音声ファイルの存在確認
+                    expected_audio_file = self._get_audio_filename(line_num)
+                    current_status = '未生成'
+                    if os.path.exists(expected_audio_file):
+                        current_status = '成功'
+                        self.log(f"AI劇場: 行 {line_num} の音声ファイル '{expected_audio_file}' は既に存在します。ステータスを「成功」に設定。")
+
                     self.script_data.append({
                         'line': line_num,
                         'action': row['action'],
                         'talker': row['talker'],
                         'words': row['words'],
-                        'status': '未生成' # 初期ステータス
+                        'status': current_status
                     })
                     self.script_tree.insert('', 'end', values=(
-                        line_num, row['action'], row['talker'], row['words'], '未生成'
+                        line_num, row['action'], row['talker'], row['words'], current_status
                     ))
                     line_num += 1
             self.log(f"AI劇場: CSVファイル '{filepath}' を読み込みました。全{len(self.script_data)}行。")
@@ -2821,22 +2828,25 @@ class AITuberMainGUI:
 
                     line_num = line_data['line']
                     self.log(f"AI劇場: 行 {line_num} を再生準備中...")
-                    self.root.after(0, self._update_script_tree_status, line_num, "再生準備") # UI更新
+                    self.root.after(0, self._update_script_tree_status, line_num, "再生準備中...") # UI更新 (文字列統一)
 
                     audio_file_path = self._get_audio_filename(line_num)
+                    current_line_status = line_data.get('status', '未生成') # script_dataからステータスを取得
 
-                    if not os.path.exists(audio_file_path):
-                        self.log(f"AI劇場: 音声ファイルが見つかりません: {audio_file_path}。生成します...")
+                    if current_line_status == '成功' and os.path.exists(audio_file_path):
+                        self.log(f"AI劇場: 行 {line_num} は「成功」ステータスです。既存の音声ファイル '{audio_file_path}' を使用します。")
+                        # 音声合成処理をスキップ
+                    elif not os.path.exists(audio_file_path): # ステータスが成功でない、またはファイルが見つからない場合
+                        self.log(f"AI劇場: 音声ファイルが見つからないか、未生成です: {audio_file_path} (ステータス: {current_line_status})。生成します...")
                         self.root.after(0, self._update_script_tree_status, line_num, "生成中...")
                         success = loop.run_until_complete(self._synthesize_script_line(line_data))
                         if not success:
                             self.log(f"AI劇場: 行 {line_num} の音声生成に失敗したため、再生をスキップします。")
-                            self.root.after(0, self._update_script_tree_status, line_num, "生成失敗")
-                            # オプション: エラー発生時に連続再生を中止するかどうか
-                            # messagebox.showerror("再生エラー", f"行 {line_num} の音声生成に失敗しました。連続再生を中止します。")
-                            # break
+                            self.root.after(0, self._update_script_tree_status, line_num, "失敗") # 「生成失敗」から「失敗」へ
                             continue # 次の行へ
-                        self.root.after(0, self._update_script_tree_status, line_num, "生成完了")
+                        self.root.after(0, self._update_script_tree_status, line_num, "成功") # 「生成完了」から「成功」へ
+                    # else: ファイルは存在するがステータスが '成功' ではない場合 (例: '生成失敗'後に手動でファイル配置など)
+                        # この場合は、下の os.path.exists(audio_file_path) で再生される
 
                     if os.path.exists(audio_file_path):
                         self.log(f"AI劇場: 音声ファイル {audio_file_path} を再生します。")
