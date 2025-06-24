@@ -540,12 +540,23 @@ class VOICEVOXEngineAPI(VoiceEngineBase):
     async def check_availability(self):
         """エンジンの可用性をチェック"""
         try:
+            # 既存の speaker 情報をクリアして、常に最新の情報を取得する
+            self.speakers = []
+            self.is_available = False
             async with aiohttp.ClientSession() as session:
                 async with session.get(f"{self.base_url}/speakers", timeout=3) as response:
                     if response.status == 200:
                         self.speakers = await response.json()
-                        self.is_available = True
-                        return True
+                        if self.speakers: # speakersが空でないことを確認
+                            self.is_available = True
+                            print(f"VOICEVOX Engine接続成功。話者情報取得: {len(self.speakers)}名")
+                            return True
+                        else:
+                            print("VOICEVOX Engine接続成功。しかし話者情報が空です。")
+                            return False # 話者情報がなければ利用不可とみなす
+                    else:
+                        print(f"VOICEVOX Engine接続エラー: Status {response.status}")
+                        return False
         except Exception as e:
             print(f"VOICEVOX Engine接続エラー: {e}")
             self.is_available = False
@@ -553,35 +564,69 @@ class VOICEVOXEngineAPI(VoiceEngineBase):
     
     def get_available_voices(self):
         """利用可能な音声一覧を取得"""
-        if not self.speakers:
-            import asyncio
-            loop = asyncio.new_event_loop()
-            asyncio.set_event_loop(loop)
-            try:
-                loop.run_until_complete(self.check_availability())
-            except:
-                pass
-            finally:
-                loop.close()
-        
-        voice_list = []
-        for speaker in self.speakers:
-            for style in speaker.get('styles', []):
-                voice_name = f"{speaker['name']}({style['name']})"
-                voice_list.append(voice_name)
-        
-        if not voice_list:
-            voice_list = [
-                "ずんだもん(ノーマル)", "ずんだもん(あまあま)", "ずんだもん(つよつよ)",
-                "四国めたん(ノーマル)", "四国めたん(あまあま)", "四国めたん(つよつよ)",
-                "春日部つむぎ(ノーマル)", "雨晴はう(ノーマル)"
+        # check_availability が呼び出され、self.speakers が更新されていることを期待
+        # もし self.speakers が空、または check_availability が失敗していたらフォールバック
+        if not self.is_available or not self.speakers:
+            print("VOICEVOX Engineから話者情報を取得できなかったため、ハードコードされたリストを使用します。")
+            # フォールバック用のハードコードリスト (最新の状況に合わせて拡充)
+            return [
+                "ずんだもん(ノーマル)", "ずんだもん(あまあま)", "ずんだもん(ツンツン)", "ずんだもん(セクシー)", "ずんだもん(ささやき)", "ずんだもん(ヒソヒソ)", "ずんだもん(ヘロヘロ)", "ずんだもん(なみだめ)",
+                "四国めたん(ノーマル)", "四国めたん(あまあま)", "四国めたん(ツンツン)", "四国めたん(セクシー)", "四国めたん(ささやき)", "四国めたん(ヒソヒソ)",
+                "春日部つむぎ(ノーマル)",
+                "雨晴はう(ノーマル)",
+                "波音リツ(ノーマル)", "波音リツ(クイーン)",
+                "玄野武宏(ノーマル)", "玄野武宏(喜び)", "玄野武宏(ツンギレ)", "玄野武宏(悲しみ)",
+                "白上虎太郎(ふつう)", "白上虎太郎(わーい)", "白上虎太郎(おこ)", "白上虎太郎(びくびく)", "白上虎太郎(びえーん)",
+                "青山龍星(ノーマル)", "青山龍星(熱血)", "青山龍星(不機嫌)", "青山龍星(喜び)", "青山龍星(しっとり)", "青山龍星(かなしみ)", "青山龍星(囁き)",
+                "冥鳴ひまり(ノーマル)",
+                "九州そら(ノーマル)", "九州そら(あまあま)", "九州そら(ツンツン)", "九州そら(セクシー)", "九州そら(ささやき)",
+                "もち子さん(ノーマル)", "もち子さん(セクシー／あん子)", "もち子さん(泣き)", "もち子さん(怒り)", "もち子さん(喜び)", "もち子さん(のんびり)",
+                "剣崎雌雄(ノーマル)",
+                "WhiteCUL(ノーマル)", "WhiteCUL(たのしい)", "WhiteCUL(かなしい)", "WhiteCUL(びえーん)",
+                "後鬼(人間ver.)", "後鬼(ぬいぐるみver.)", "後鬼(人間（怒り）ver.)", "後鬼(鬼ver.)",
+                "No.7(ノーマル)", "No.7(アナウンス)", "No.7(読み聞かせ)",
+                "ちび式じい(ノーマル)",
+                "櫻歌ミコ(ノーマル)", "櫻歌ミコ(第二形態)", "櫻歌ミコ(ロリ)",
+                "小夜/SAYO(ノーマル)",
+                "ナースロボ＿タイプＴ(ノーマル)", "ナースロボ＿タイプＴ(楽々)", "ナースロボ＿タイプＴ(恐怖)", "ナースロボ＿タイプＴ(内緒話)",
+                "†聖騎士 紅桜†(ノーマル)",
+                "雀松朱司(ノーマル)",
+                "麒ヶ島宗麟(ノーマル)",
+                "春歌ナナ(ノーマル)",
+                "猫使アル(ノーマル)", "猫使アル(おちつき)", "猫使アル(うきうき)",
+                "猫使ビィ(ノーマル)", "猫使ビィ(おちつき)", "猫使ビィ(人見知り)",
+                "中国うさぎ(ノーマル)", "中国うさぎ(おどろき)", "中国うさぎ(こわがり)", "中国うさぎ(へろへろ)",
+                "栗田まろん(ノーマル)",
+                "あいえるたん(ノーマル)",
+                "満別花丸(ノーマル)", "満別花丸(元気)", "満別花丸(ささやき)", "満別花丸(ぶりっ子)", "満別花丸(ボーイ)",
+                "琴詠ニア(ノーマル)",
+                "Voidoll(ノーマル)",
+                "ぞん子(ノーマル)", "ぞん子(低血圧)", "ぞん子(覚醒)", "ぞん子(実況風)",
+                "中部つるぎ(ノーマル)", "中部つるぎ(怒り)", "中部つるぎ(ヒソヒソ)", "中部つるぎ(おどおど)", "中部つるぎ(絶望と敗北)",
+                "離途(ノーマル)",
+                "黒沢冴白(ノーマル)"
             ]
-        
-        return voice_list
-    
+
+        voice_list = []
+        if self.speakers: # self.speakers が Engine から取得した情報で埋まっている場合
+            for speaker_info in self.speakers:
+                speaker_name = speaker_info.get('name')
+                styles = speaker_info.get('styles', [])
+                if speaker_name and styles:
+                    for style_info in styles:
+                        style_name = style_info.get('name')
+                        if style_name:
+                            voice_list.append(f"{speaker_name}({style_name})")
+
+        if not voice_list: # Engine から取得できなかった、または空だった場合の最終フォールバック
+            print("VOICEVOX Engineからの話者情報が取得できなかったため、ハードコードされたリスト(再フォールバック)を使用します。")
+            return ["ずんだもん(ノーマル)", "四国めたん(ノーマル)"] # 最低限のリスト
+
+        return sorted(list(set(voice_list))) # 重複を除きソートして返す
+
     def get_max_text_length(self):
         return self.max_length
-    
+
     def get_engine_info(self):
         return {
             "name": "VOICEVOX Engine",
@@ -589,39 +634,72 @@ class VOICEVOXEngineAPI(VoiceEngineBase):
             "quality": "★★★☆☆",
             "description": "定番キャラクター・ずんだもん等・安定動作"
         }
-    
-    def _parse_voice_name(self, voice_name):
+
+    def _parse_voice_name(self, voice_name_input):
         """音声名からスピーカーIDを取得"""
         try:
-            if '(' in voice_name and ')' in voice_name:
-                speaker_name = voice_name.split('(')[0]
-                style_name = voice_name.split('(')[1].replace(')', '')
+            parsed_speaker_name = ""
+            parsed_style_name = ""
+
+            if '(' in voice_name_input and ')' in voice_name_input:
+                parsed_speaker_name = voice_name_input.split('(')[0]
+                parsed_style_name = voice_name_input.split('(')[1].replace(')', '')
             else:
-                speaker_name = voice_name
-                style_name = "ノーマル"
+                # スタイル名が省略されている場合は、デフォルトのスタイル名を探すか、エラーとする
+                # ここでは、まずEngineからの情報で完全一致を探すことを優先
+                parsed_speaker_name = voice_name_input
+                # スタイル名が不明な場合、Engine情報でその話者の最初のスタイルIDを使うなどの戦略も可能
+                # print(f"VOICEVOX _parse_voice_name: スタイル名が指定されていません: {voice_name_input}")
+
+            # 1. Engineから取得した情報 (self.speakers) を優先して検索
+            if self.speakers:
+                for speaker_info in self.speakers:
+                    if speaker_info.get('name') == parsed_speaker_name:
+                        for style_info in speaker_info.get('styles', []):
+                            if parsed_style_name == "" or style_info.get('name') == parsed_style_name:
+                                print(f"VOICEVOX _parse_voice_name (dynamic): Found ID {style_info['id']} for {voice_name_input}")
+                                return style_info['id']
             
-            for speaker in self.speakers:
-                if speaker['name'] == speaker_name:
-                    for style in speaker.get('styles', []):
-                        if style['name'] == style_name:
-                            return style['id']
-            
-            character_mapping = {
-                "ずんだもん": {"ノーマル": 3, "あまあま": 1, "つよつよ": 7},
-                "四国めたん": {"ノーマル": 2, "あまあま": 0, "つよつよ": 6},
+            # 2. Engine情報で見つからなかった場合、ハードコードされたマッピングでフォールバック
+            #    このマッピングは主要なキャラクターのみ、または最新情報に更新する
+            print(f"VOICEVOX _parse_voice_name: Engine情報に '{voice_name_input}' が見つかりません。ハードコードマッピングを試みます。")
+            character_mapping_fallback = {
+                "ずんだもん": {"ノーマル": 3, "あまあま": 1, "ツンツン": 7, "セクシー": 26, "ささやき":22, "ヒソヒソ":38, "ヘロヘロ":42, "なみだめ":46}, # VOICEVOX 0.14.x 以前のIDと混在しないように注意
+                "四国めたん": {"ノーマル": 2, "あまあま": 0, "ツンツン": 6, "セクシー": 4, "ささやき":36, "ヒソヒソ":37},
                 "春日部つむぎ": {"ノーマル": 8},
-                "雨晴はう": {"ノーマル": 10}
+                "雨晴はう": {"ノーマル": 10},
+                "波音リツ": {"ノーマル": 9, "クイーン":53},
+                "玄野武宏": {"ノーマル": 11, "喜び":47, "ツンギレ":48, "悲しみ":49},
+                "白上虎太郎": {"ふつう": 12, "わーい":50, "おこ":51, "びくびく":52, "びえーん":53}, # スタイル名が「ふつう」
+                "青山龍星": {"ノーマル": 13, "熱血":58, "不機嫌":59, "喜び":60, "しっとり":61, "かなしみ":62, "囁き":63},
+                "冥鳴ひまり": {"ノーマル": 14},
+                "九州そら": {"ノーマル": 16, "あまあま":17, "ツンツン":18, "セクシー":19, "ささやき":20},
+                # 以下、必要に応じて他のキャラクターも追加
+                # "もち子さん": {"ノーマル": 21, "セクシー／あん子": ..., "泣き": ..., "怒り": ..., "喜び": ..., "のんびり": ...},
+                # "剣崎雌雄": {"ノーマル": 23},
+                # "WhiteCUL": {"ノーマル": 24, "たのしい": ..., "かなしい": ..., "びえーん": ...},
             }
             
-            if speaker_name in character_mapping:
-                styles = character_mapping[speaker_name]
-                return styles.get(style_name, list(styles.values())[0])
+            if parsed_speaker_name in character_mapping_fallback:
+                styles = character_mapping_fallback[parsed_speaker_name]
+                # スタイル名が指定されていない場合、そのキャラクターの最初のスタイルID（多くは"ノーマル"）を返す
+                if parsed_style_name == "" and styles:
+                     # "ノーマル" があればそれを、なければリストの最初のものを返す
+                    found_id = styles.get("ノーマル", next(iter(styles.values())))
+                    print(f"VOICEVOX _parse_voice_name (fallback, no style): Using ID {found_id} for {parsed_speaker_name}")
+                    return found_id
+                elif parsed_style_name in styles:
+                    found_id = styles[parsed_style_name]
+                    print(f"VOICEVOX _parse_voice_name (fallback): Found ID {found_id} for {voice_name_input}")
+                    return found_id
             
-            return 3
+            # それでも見つからない場合は、アプリケーションのデフォルト話者ID (例: ずんだもんノーマル)
+            print(f"VOICEVOX _parse_voice_name: ハードコードマッピングでも '{voice_name_input}' が見つかりません。デフォルトID 3 を使用します。")
+            return 3 # ずんだもん(ノーマル)のID
             
         except Exception as e:
-            print(f"音声名パースエラー: {e}")
-            return 3
+            print(f"VOICEVOX 音声名パースエラー: {e}, voice_name: {voice_name_input}. デフォルトID 3 を使用します。")
+            return 3 # エラー時もデフォルトID
     
     async def synthesize_speech(self, text, voice_model="ずんだもん(ノーマル)", speed=1.0, **kwargs):
         """
@@ -2076,29 +2154,62 @@ class CharacterEditDialog:
     def update_voice_models(self):
         """選択された音声エンジンに応じて音声モデルリストを更新（4エンジン完全対応）"""
         engine = self.voice_engine_var.get()
+        voices = []
+        default_voice = ""
+        info_text = ""
         
         # エンジンごとに音声モデルを取得
         if engine == "google_ai_studio_new":
             instance = GoogleAIStudioNewVoiceAPI()
             voices = instance.get_available_voices()
-            # default_voice はAPIがサポートするリストの最初のものにする
-            default_voice = voices[0] if voices else "puck" # フォールバックとして "puck" (APIエラーリストより)
+            default_voice = voices[0] if voices else "puck"
             info_text = "🚀 最新SDK利用・gemini-2.5-flash-preview-ttsモデル・リアルタイム対応・多言語"
         elif engine == "avis_speech":
-            voices = ["Anneli(ノーマル)", "Anneli(クール)", "Anneli(ささやき)", "Anneli(元気)", "Anneli(悲しみ)", "Anneli(怒り)"]
+            # AvisSpeechの音声リストは現状固定だが、将来的にはAPIから取得する可能性も考慮
+            avis_instance = AvisSpeechEngineAPI()
+            # AvisSpeechEngineAPI.get_available_voices は asyncio を使う場合があるため、
+            # ここでは CharacterEditDialog の同期的なコンテキストで呼び出すのが難しい。
+            # GUIの初期化時に一度だけ取得しておくか、AvisSpeechEngineAPI側で同期的に取得できるメソッドを用意する必要がある。
+            # 現状はハードコードされたリストを維持するが、理想的には動的に取得したい。
+            voices = ["Anneli(ノーマル)", "Anneli(クール)", "Anneli(ささやき)", "Anneli(元気)", "Anneli(悲しみ)", "Anneli(怒り)"] # 仮
+            if not voices: # もしAPIから動的に取得しようとして失敗した場合のフォールバック
+                 voices = ["Anneli(ノーマル)", "Anneli(クール)", "Anneli(ささやき)"]
             default_voice = "Anneli(ノーマル)"
             info_text = "🎙️ ローカル実行・高品質・VOICEVOX互換API・感情表現対応"
         elif engine == "voicevox":
-            voices = [
-                "ずんだもん(ノーマル)", "ずんだもん(あまあま)", "ずんだもん(つよつよ)", "ずんだもん(セクシー)",
-                "四国めたん(ノーマル)", "四国めたん(あまあま)", "四国めたん(つよつよ)", "四国めたん(セクシー)",
-                "春日部つむぎ(ノーマル)", "雨晴はう(ノーマル)", "波音リツ(ノーマル)", "玄野武宏(ノーマル)"
-            ]
-            default_voice = "ずんだもん(ノーマル)"
-            info_text = "🎤 定番キャラクター・ずんだもん等・安定動作・豊富な感情表現"
+            voicevox_instance = VOICEVOXEngineAPI()
+            # VOICEVOXEngineAPI.get_available_voices は内部で check_availability を呼び出す可能性があり、
+            # check_availability は asyncio を使用する。
+            # ここでは、VOICEVOXEngineAPIのインスタンスを作成し、get_available_voicesを呼び出す。
+            # get_available_voices内で必要に応じて同期的にcheck_availabilityを呼び出すように修正済みと仮定。
+            # または、GUIの初期化時にVoiceManagerなどを経由して事前に取得しておく。
+            # ここでは直接呼び出すが、もしGUIがフリーズするようなら非同期処理の検討が必要。
+            # VOICEVOXEngineAPI の get_available_voices は同期的に動作するように改修した前提で進める。
+            # （内部でループを回して asyncio.run するなど）
+            # 実際には、GUIの応答性を保つために、これらのAPI呼び出しは別スレッドで行い、
+            # 結果をキューでメインスレッドに渡してUIを更新するのが望ましい。
+            # 今回の改修範囲では、VOICEVOXEngineAPI.get_available_voicesが同期的に動作すると仮定。
+
+            # VOICEVOXEngineAPI のインスタンスを作成
+            # このインスタンスは CharacterManager 経由ではなく、直接生成
+            # TODO: VoiceEngineManager を CharacterEditDialog に渡してそこから取得する方が良いかもしれない
+            temp_loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(temp_loop)
+            try:
+                # check_availability を呼び出して self.speakers を更新させる
+                temp_loop.run_until_complete(voicevox_instance.check_availability())
+                voices = voicevox_instance.get_available_voices() # これで動的に取得されたリスト、またはフォールバックリスト
+            except Exception as e:
+                print(f"CharacterEditDialog: VOICEVOXの音声リスト取得中にエラー: {e}")
+                voices = ["ずんだもん(ノーマル)"] # エラー時の最終フォールバック
+            finally:
+                temp_loop.close()
+
+            default_voice = voices[0] if voices else "ずんだもん(ノーマル)"
+            info_text = "🎤 定番キャラクター・ずんだもん等・安定動作・豊富な感情表現（Engineから動的取得）"
         else:  # system_tts
-            system_tts = SystemTTSAPI()
-            voices = system_tts.get_available_voices() # Should now include SAPI5 and OneCore voices
+            system_tts_instance = SystemTTSAPI()
+            voices = system_tts_instance.get_available_voices()
             default_voice = "Haruka (SAPI5)" if "Haruka (SAPI5)" in voices else (voices[0] if voices else "デフォルト")
             info_text = "💻 OS標準TTS (SAPI5 & OneCore対応)・完全無料・インターネット不要・安定動作"
         
