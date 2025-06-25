@@ -2566,26 +2566,735 @@ class AITuberMainGUI:
         script_tree_scroll_x.pack(side=tk.BOTTOM, fill=tk.X)
         self.script_tree.pack(fill=tk.BOTH, expand=True)
 
-        # 操作ボタンフレーム (下部)
-        action_buttons_frame = ttk.Frame(ai_theater_frame)
-        action_buttons_frame.pack(fill=tk.X, padx=10, pady=10)
+        # 台本プレビューのイベントバインド (行選択時)
+        self.script_tree.bind('<<TreeviewSelect>>', self.on_script_line_selected)
 
-        left_buttons_frame = ttk.Frame(action_buttons_frame)
-        left_buttons_frame.pack(side=tk.LEFT)
 
-        ttk.Button(left_buttons_frame, text="🔊 選択行の音声生成", command=self.generate_selected_line_audio).pack(side=tk.LEFT, padx=5)
-        ttk.Button(left_buttons_frame, text="🔊 全ての音声生成", command=self.generate_all_lines_audio).pack(side=tk.LEFT, padx=5)
-        ttk.Button(left_buttons_frame, text="▶️ 連続再生", command=self.play_script_sequentially).pack(side=tk.LEFT, padx=5)
-        ttk.Button(left_buttons_frame, text="⏹️ 連続再生停止", command=self.stop_sequential_play).pack(side=tk.LEFT, padx=5)
+        # 行追加・更新エリア
+        edit_area_frame = ttk.LabelFrame(ai_theater_frame, text="行追加・更新", padding="10")
+        edit_area_frame.pack(fill=tk.X, padx=10, pady=5)
 
-        right_buttons_frame = ttk.Frame(action_buttons_frame)
-        right_buttons_frame.pack(side=tk.RIGHT)
-        ttk.Button(right_buttons_frame, text="🗑️ 音声ファイル全削除", command=self.delete_all_audio_files).pack(side=tk.RIGHT, padx=5)
+        edit_area_grid = ttk.Frame(edit_area_frame)
+        edit_area_grid.pack(fill=tk.X)
 
-    def load_csv_script(self):
-        # TODO: CSVファイル読み込み処理
-        self.log("AI劇場: CSV台本読み込みボタンが押されました。")
-        messagebox.showinfo("AI劇場", "CSV台本読み込み機能は現在実装中です。")
+        ttk.Label(edit_area_grid, text="アクション:").grid(row=0, column=0, sticky=tk.W, padx=5, pady=2)
+        self.script_action_var = tk.StringVar()
+        self.script_action_combo = ttk.Combobox(edit_area_grid, textvariable=self.script_action_var, values=["talk", "narration", "wait"], state="readonly", width=15)
+        self.script_action_combo.grid(row=0, column=1, sticky=tk.W, padx=5, pady=2)
+        self.script_action_combo.bind('<<ComboboxSelected>>', self.on_script_action_selected) # アクション選択時の処理
+
+        ttk.Label(edit_area_grid, text="話者:").grid(row=0, column=2, sticky=tk.W, padx=5, pady=2)
+        self.script_talker_var = tk.StringVar()
+        self.script_talker_combo = ttk.Combobox(edit_area_grid, textvariable=self.script_talker_var, state="readonly", width=20)
+        self.script_talker_combo.grid(row=0, column=3, sticky=tk.W, padx=5, pady=2)
+        # 話者リストはキャラクター読み込み後に設定
+
+        ttk.Label(edit_area_grid, text="台詞/内容:").grid(row=1, column=0, sticky=tk.W, padx=5, pady=2)
+        self.script_words_entry = ttk.Entry(edit_area_grid, width=60) # Entryで一行
+        self.script_words_entry.grid(row=1, column=1, columnspan=3, sticky=tk.EW, padx=5, pady=2)
+
+        # 行追加・更新ボタン
+        edit_buttons_frame = ttk.Frame(edit_area_frame)
+        edit_buttons_frame.pack(fill=tk.X, pady=5)
+
+        ttk.Button(edit_buttons_frame, text="⏪最後尾に生成追加", command=self.add_and_generate_script_line).pack(side=tk.LEFT, padx=2)
+        ttk.Button(edit_buttons_frame, text="➕最後尾に追加", command=self.add_script_line_to_preview).pack(side=tk.LEFT, padx=2)
+        ttk.Button(edit_buttons_frame, text="🔄選択行を更新", command=self.update_selected_script_line).pack(side=tk.LEFT, padx=2)
+        ttk.Button(edit_buttons_frame, text="✨クリア", command=self.clear_script_input_area).pack(side=tk.LEFT, padx=2)
+
+
+        # 台本操作ボタンフレーム (プレビューの下)
+        script_action_buttons_frame = ttk.Frame(ai_theater_frame)
+        script_action_buttons_frame.pack(fill=tk.X, padx=10, pady=5)
+
+        # 左側ボタン群 (音声生成・再生系)
+        audio_ops_frame = ttk.Frame(script_action_buttons_frame)
+        audio_ops_frame.pack(side=tk.LEFT)
+        ttk.Button(audio_ops_frame, text="🔊選択行の音声生成", command=self.generate_selected_line_audio).pack(side=tk.LEFT, padx=2)
+        ttk.Button(audio_ops_frame, text="▶️選択行の音声再生", command=self.play_selected_line_audio).pack(side=tk.LEFT, padx=2) # 追加
+        ttk.Button(audio_ops_frame, text="🔊全ての音声生成", command=self.generate_all_lines_audio).pack(side=tk.LEFT, padx=2)
+        ttk.Button(audio_ops_frame, text="▶️連続再生", command=self.play_script_sequentially).pack(side=tk.LEFT, padx=2)
+        ttk.Button(audio_ops_frame, text="⏹️連続再生停止", command=self.stop_sequential_play).pack(side=tk.LEFT, padx=2)
+
+        # 中央ボタン群 (行編集系)
+        line_ops_frame = ttk.Frame(script_action_buttons_frame)
+        line_ops_frame.pack(side=tk.LEFT, padx=20) # 少し間隔をあける
+        ttk.Button(line_ops_frame, text="🔼1行上に移動", command=self.move_script_line_up).pack(side=tk.LEFT, padx=2)
+        ttk.Button(line_ops_frame, text="🔽1行下に移動", command=self.move_script_line_down).pack(side=tk.LEFT, padx=2)
+        ttk.Button(line_ops_frame, text="🗑️選択行を削除", command=self.delete_selected_script_line).pack(side=tk.LEFT, padx=2)
+
+
+        # 右側ボタン群 (ファイル操作系)
+        file_ops_frame = ttk.Frame(script_action_buttons_frame)
+        file_ops_frame.pack(side=tk.RIGHT)
+        ttk.Button(file_ops_frame, text="💾CSV台本保存", command=self.export_script_to_csv).pack(side=tk.RIGHT, padx=2) # 追加
+        ttk.Button(file_ops_frame, text="🗑️音声ファイル全削除", command=self.delete_all_audio_files).pack(side=tk.RIGHT, padx=2)
+
+
+    def on_script_action_selected(self, event=None):
+        """AI劇場の行追加エリアでアクションが選択されたときの処理"""
+        selected_action = self.script_action_var.get()
+        if selected_action == "wait":
+            self.script_talker_combo.set("") # 話者を空に
+            self.script_talker_combo.config(state="disabled") # 話者コンボボックスを非活性化
+            self.script_words_entry.delete(0, tk.END) # 台詞/内容をクリア
+            # 必要であれば、台詞/内容エントリーも非活性化または数値入力専用にする
+        else:
+            self.script_talker_combo.config(state="readonly") # 話者コンボボックスを活性化
+            # talkerのデフォルト選択などを行う場合はここに記述
+            if not self.script_talker_var.get() and self.script_talker_combo['values']:
+                 self.script_talker_var.set(self.script_talker_combo['values'][0])
+
+
+    def populate_ai_theater_talker_dropdown(self):
+        """AI劇場タブの話者プルダウンをキャラクターリストで更新する"""
+        all_chars = self.character_manager.get_all_characters()
+        char_names = [data.get('name', 'Unknown') for data in all_chars.values()]
+
+        # 「ナレーター」を固定で追加し、重複があればキャラクター名を優先
+        talker_options = ["ナレーター"] + [name for name in char_names if name != "ナレーター"]
+
+        # waitアクション用に空欄の選択肢を追加（オプション）
+        # talker_options = [""] + talker_options # 先頭に空欄を追加
+
+        self.script_talker_combo['values'] = talker_options
+        if talker_options and not self.script_talker_var.get(): # 現在の選択がない場合のみデフォルト設定
+            self.script_talker_var.set(talker_options[0])
+
+        # 現在選択中のアクションがwaitでなければ、選択肢を有効にする
+        if self.script_action_var.get() != "wait":
+            self.script_talker_combo.config(state="readonly")
+            # talkerのデフォルト選択などを行う場合はここに記述
+            if not self.script_talker_var.get() and self.script_talker_combo['values']: # 何も選択されていなければ最初のものを
+                 self.script_talker_var.set(self.script_talker_combo['values'][0])
+        else: # wait の場合
+            self.script_talker_combo.set("") # 話者を空に
+            self.script_talker_combo.config(state="disabled")
+
+
+    def clear_script_input_area(self):
+        """AI劇場の行追加・更新エリアをクリアする"""
+        self.script_action_var.set("talk") # デフォルトアクション
+        self.script_words_entry.delete(0, tk.END)
+
+        # 話者リストがあれば最初のものを選択、なければ空
+        if self.script_talker_combo['values']:
+            self.script_talker_var.set(self.script_talker_combo['values'][0])
+        else:
+            self.script_talker_var.set("")
+        self.script_talker_combo.config(state="readonly") # 活性化 (waitでない限り)
+
+        # プレビューの選択解除
+        if self.script_tree.selection():
+            self.script_tree.selection_remove(self.script_tree.selection()[0])
+
+        self.on_script_action_selected() # アクション選択時の処理を呼び出し、話者コンボの状態を正しくする
+        self.log("AI劇場: 入力エリアをクリアしました。")
+
+    def on_script_line_selected(self, event=None):
+        """AI劇場の台本プレビューで行が選択されたときの処理"""
+        selected_items = self.script_tree.selection()
+        if not selected_items:
+            # 選択が解除された場合、入力欄をクリアする（オプション）
+            # self.clear_script_input_area()
+            return
+
+        selected_item_id = selected_items[0]
+        # Treeviewから直接値を取得するのではなく、self.script_data から対応する行データを取得する
+        # Treeviewの values は表示用であり、実際のデータソースは self.script_data
+        try:
+            # Treeviewの値から行番号を取得
+            tree_values = self.script_tree.item(selected_item_id, 'values')
+            if not tree_values or len(tree_values) == 0:
+                self.log(f"AI劇場: Treeviewから行番号の取得に失敗。Values: {tree_values}")
+                return
+
+            line_num_in_tree = int(tree_values[0])
+
+            # self.script_data から該当行を検索
+            line_data = next((item for item in self.script_data if item['line'] == line_num_in_tree), None)
+
+            if line_data:
+                action = line_data.get('action', 'talk')
+                talker = line_data.get('talker', '')
+                words = line_data.get('words', '')
+
+                self.script_action_var.set(action)
+                self.script_words_entry.delete(0, tk.END)
+                self.script_words_entry.insert(0, words)
+
+                # 話者プルダウンの処理
+                if action == "wait":
+                    self.script_talker_var.set("") # wait時は空
+                    self.script_talker_combo.config(state="disabled")
+                else:
+                    self.script_talker_combo.config(state="readonly")
+                    # 既存のキャラクターリストにtalkerが存在するか確認
+                    if talker in self.script_talker_combo['values']:
+                        self.script_talker_var.set(talker)
+                    elif self.script_talker_combo['values']: # リストにない場合は最初のものを選択
+                        self.script_talker_var.set(self.script_talker_combo['values'][0])
+                        self.log(f"AI劇場: 話者 '{talker}' がリストにないため、最初の話者 '{self.script_talker_combo['values'][0]}' を選択しました。")
+                    else: # リストが空の場合
+                        self.script_talker_var.set("")
+            else:
+                self.log(f"AI劇場: script_dataに該当する行データが見つかりません。行番号(Tree): {line_num_in_tree}")
+                # 念のため入力欄をクリア
+                self.clear_script_input_area()
+
+        except (ValueError, TypeError, IndexError) as e:
+            self.log(f"AI劇場: 行選択処理中にエラー: {e}. Tree Values: {self.script_tree.item(selected_item_id, 'values')}")
+            self.clear_script_input_area() # エラー時もクリア
+
+
+    def add_script_line_to_preview(self):
+        """行追加・更新エリアの内容を台本プレビューの最後尾に追加する"""
+        action = self.script_action_var.get()
+        talker = self.script_talker_var.get() if action != "wait" else ""
+        words = self.script_words_entry.get()
+
+        if not action:
+            messagebox.showwarning("入力エラー", "アクションを選択してください。")
+            return
+        if action != "wait" and not talker:
+            messagebox.showwarning("入力エラー", "話者を選択してください。")
+            return
+        if not words:
+            if action == "talk" or action == "narration":
+                messagebox.showwarning("入力エラー", "台詞/内容を入力してください。")
+                return
+            elif action == "wait":
+                if not words.strip().replace('.', '', 1).isdigit(): # 小数点も許容
+                    messagebox.showwarning("入力エラー", "待機時間を数値で入力してください。")
+                    return
+
+        # 新しい行番号を決定 (既存の行があればその次の番号、なければ1)
+        new_line_num = 1
+        if self.script_data:
+            new_line_num = max(item['line'] for item in self.script_data) + 1
+
+        new_line_data = {
+            'line': new_line_num,
+            'action': action,
+            'talker': talker,
+            'words': words,
+            'status': '未生成'
+        }
+        self.script_data.append(new_line_data)
+
+        self.script_tree.insert('', 'end', values=(
+            new_line_num, action, talker, words, '未生成'
+        ))
+
+        self.log(f"AI劇場: 行 {new_line_num} を追加しました: {action}, {talker}, {words[:20]}...")
+        self.clear_script_input_area() # 入力エリアをクリア
+
+    def add_and_generate_script_line(self):
+        """行追加・更新エリアの内容を追加し、その行の音声を生成・再生する"""
+        action = self.script_action_var.get()
+        talker = self.script_talker_var.get() if action != "wait" else ""
+        words = self.script_words_entry.get()
+
+        if not action:
+            messagebox.showwarning("入力エラー", "アクションを選択してください。")
+            return
+        if action != "wait" and not talker:
+            messagebox.showwarning("入力エラー", "話者を選択してください。")
+            return
+        if not words:
+            if action == "talk" or action == "narration":
+                messagebox.showwarning("入力エラー", "台詞/内容を入力してください。")
+                return
+            elif action == "wait":
+                if not words.strip().replace('.', '', 1).isdigit():
+                     messagebox.showwarning("入力エラー", "待機時間を数値で入力してください。")
+                     return
+
+        if not self.current_script_path or self.audio_output_folder is None:
+            messagebox.showerror("エラー", "先にCSV台本を読み込み、音声保存フォルダが設定されている必要があります。")
+            return
+
+        new_line_num = 1
+        if self.script_data:
+            new_line_num = max(item['line'] for item in self.script_data) + 1
+
+        new_line_data = {
+            'line': new_line_num,
+            'action': action,
+            'talker': talker,
+            'words': words,
+            'status': '未生成'
+        }
+        self.script_data.append(new_line_data)
+
+        # Treeview にも追加
+        item_id = self.script_tree.insert('', 'end', values=(
+            new_line_num, action, talker, words, '生成中...' # 最初は生成中ステータス
+        ))
+        self.script_tree.see(item_id) # 追加された行が見えるようにスクロール
+
+        self.log(f"AI劇場: 行 {new_line_num} を生成付きで追加開始: {action}, {talker}, {words[:20]}...")
+        self.clear_script_input_area()
+
+        def run_synthesis_and_play():
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+            success = False
+            audio_file_to_play = None
+            try:
+                # _synthesize_script_line は bool を返すので、ファイルパスも取得する必要がある
+                # ここでは、成功したら _get_audio_filename でパスを取得する
+                synthesis_success = loop.run_until_complete(self._synthesize_script_line(new_line_data))
+
+                if synthesis_success:
+                    audio_file_to_play = self._get_audio_filename(new_line_num)
+                    if os.path.exists(audio_file_to_play):
+                        self.root.after(0, self._update_script_tree_status, new_line_num, "成功")
+                        self.log(f"AI劇場: 行 {new_line_num} の音声生成成功。再生します。")
+                        # play_audio_file が単一ファイルを再生し、削除しないことを前提とする
+                        loop.run_until_complete(self.audio_player.play_audio_file(str(audio_file_to_play)))
+                        success = True
+                    else:
+                        self.log(f"AI劇場: 行 {new_line_num} の音声生成には成功しましたが、ファイルが見つかりません。")
+                        self.root.after(0, self._update_script_tree_status, new_line_num, "ファイルなし")
+                else:
+                    self.log(f"AI劇場: 行 {new_line_num} の音声生成に失敗しました。")
+                    self.root.after(0, self._update_script_tree_status, new_line_num, "失敗")
+                    messagebox.showerror("音声生成エラー", f"行 {new_line_num} の音声生成に失敗しました。")
+
+            except Exception as e:
+                self.log(f"AI劇場: 生成追加処理中にエラー (行 {new_line_num}): {e}")
+                import traceback
+                self.log(f"詳細トレース: {traceback.format_exc()}")
+                self.root.after(0, self._update_script_tree_status, new_line_num, "エラー")
+                messagebox.showerror("処理エラー", f"行 {new_line_num} の生成追加処理中にエラーが発生しました: {e}")
+            finally:
+                loop.close()
+
+        threading.Thread(target=run_synthesis_and_play, daemon=True).start()
+
+
+    def update_selected_script_line(self):
+        """選択されている台本プレビューの行を行追加・更新エリアの内容で更新する"""
+        selected_items = self.script_tree.selection()
+        if not selected_items:
+            messagebox.showwarning("選択なし", "更新する行を台本プレビューで選択してください。")
+            return
+
+        selected_item_id = selected_items[0]
+
+        try:
+            # Treeviewの値から行番号を取得
+            tree_values = self.script_tree.item(selected_item_id, 'values')
+            if not tree_values or len(tree_values) == 0: return # defensive
+            line_num_to_update = int(tree_values[0])
+        except (ValueError, TypeError, IndexError):
+            messagebox.showerror("エラー", "選択された行の情報を取得できませんでした。")
+            return
+
+        # 更新後の情報を取得
+        new_action = self.script_action_var.get()
+        new_talker = self.script_talker_var.get() if new_action != "wait" else ""
+        new_words = self.script_words_entry.get()
+
+        if not new_action:
+            messagebox.showwarning("入力エラー", "アクションを選択してください。")
+            return
+        if new_action != "wait" and not new_talker:
+            messagebox.showwarning("入力エラー", "話者を選択してください。")
+            return
+        if not new_words:
+            if new_action == "talk" or new_action == "narration":
+                messagebox.showwarning("入力エラー", "台詞/内容を入力してください。")
+                return
+            elif new_action == "wait":
+                 if not new_words.strip().replace('.', '', 1).isdigit():
+                    messagebox.showwarning("入力エラー", "待機時間を数値で入力してください。")
+                    return
+
+        # script_data 内の該当行を更新
+        line_data_found = False
+        for i, data_item in enumerate(self.script_data):
+            if data_item['line'] == line_num_to_update:
+                self.script_data[i]['action'] = new_action
+                self.script_data[i]['talker'] = new_talker
+                self.script_data[i]['words'] = new_words
+                self.script_data[i]['status'] = '未生成' # 更新時は未生成に戻す
+                line_data_found = True
+                break
+
+        if not line_data_found:
+            messagebox.showerror("エラー", f"内部データで行 {line_num_to_update} が見つかりませんでした。")
+            return
+
+        # Treeview の表示を更新
+        self.script_tree.item(selected_item_id, values=(
+            line_num_to_update, new_action, new_talker, new_words, '未生成'
+        ))
+
+        # 古い音声ファイルがあれば削除
+        audio_file_to_delete = self._get_audio_filename(line_num_to_update)
+        if os.path.exists(audio_file_to_delete):
+            try:
+                os.remove(audio_file_to_delete)
+                self.log(f"AI劇場: 更新のため音声ファイル {audio_file_to_delete} を削除しました。")
+            except FileNotFoundError:
+                self.log(f"AI劇場: 更新時、削除対象の音声ファイルが見つかりませんでした: {audio_file_to_delete}") # これはエラーではない場合もある
+            except PermissionError as e_perm:
+                self.log(f"AI劇場: 音声ファイル削除パーミッションエラー (更新時) {audio_file_to_delete}: {e_perm}")
+                messagebox.showwarning("ファイル削除エラー", f"古い音声ファイルの削除中にパーミッションエラーが発生しました。\n{e_perm}")
+            except OSError as e_os:
+                self.log(f"AI劇場: 音声ファイル削除OSエラー (更新時) {audio_file_to_delete}: {e_os}")
+                messagebox.showwarning("ファイル削除エラー", f"古い音声ファイルの削除中にエラーが発生しました。\n{e_os}")
+            except Exception as e: # その他の予期せぬエラー
+                self.log(f"AI劇場: 音声ファイル削除中に予期せぬエラー (更新時) {audio_file_to_delete}: {e}")
+                messagebox.showwarning("ファイル削除エラー", f"古い音声ファイルの削除中に予期せぬエラーが発生しました。\n{e}")
+
+        self.log(f"AI劇場: 行 {line_num_to_update} を更新しました: {new_action}, {new_talker}, {new_words[:20]}...")
+        # self.clear_script_input_area() # 更新後はクリアしない方が連続編集しやすい場合もある
+        # プレビューの選択は維持
+
+    def _remap_script_lines_and_ui(self, select_line_num_after_remap=None):
+        """
+        script_dataに基づいて行番号を再割り当てし、Treeviewを再描画する。
+        音声ファイル名も新しい行番号に合わせてリネームする。
+        select_line_num_after_remap: 再描画後に選択状態にしたい行の新しい行番号。
+        """
+        if not self.audio_output_folder:
+            self.log("AI劇場: _remap_script_lines_and_ui - audio_output_folderが未設定のため処理をスキップ。")
+            # messagebox.showerror("エラー", "音声出力フォルダが設定されていません。") # ここで出すと頻発する可能性
+            return
+
+        temp_audio_files_mapping = {} # {old_path: new_path}
+
+        # 1. 新しい行番号を割り当て、リネーム対象の音声ファイルを特定
+        new_script_data = []
+        for new_idx, old_line_data in enumerate(self.script_data):
+            old_line_num = old_line_data['line']
+            new_line_num = new_idx + 1
+
+            new_item = old_line_data.copy()
+            new_item['line'] = new_line_num
+            new_script_data.append(new_item)
+
+            if old_line_num != new_line_num: # 行番号が変わる場合のみリネーム対象
+                old_audio_path = self._get_audio_filename(old_line_num)
+                new_audio_path = self._get_audio_filename(new_line_num)
+                if os.path.exists(old_audio_path):
+                    temp_audio_files_mapping[str(old_audio_path)] = str(new_audio_path)
+
+        self.script_data = new_script_data
+
+        # 2. 音声ファイルのリネーム (一時ファイルを経由して衝突を避ける)
+        # リネームは逆順で行うと、上書きのリスクを減らせる場合があるが、
+        # old_path -> temp_path, temp_path -> new_path の2段階が安全。
+        # ここでは、直接リネームを試みるが、衝突の可能性がある場合はより複雑な処理が必要。
+        # 簡単のため、リネーム対象の新しいパスが既に存在する場合は警告を出す。
+        # より堅牢にするには、まず全て一時的な名前にリネームし、その後新しい名前にリネームする。
+
+        # 簡単化のため、リネームは古い番号から新しい番号へ直接行う。
+        # 衝突を避けるため、リネーム対象の新しいパスが既に存在し、かつそれがリネーム元でない場合はスキップまたは警告。
+        # しかし、この関数が呼ばれる時点ではscript_dataのline番号は既に更新されているので、
+        # _get_audio_filename(old_line_data['line']) は古い番号のファイル名を返す。
+
+        # リネーム戦略：
+        # a. 全ての old_path -> temp_unique_path にリネーム
+        # b. 全ての temp_unique_path -> new_path にリネーム
+        intermediate_paths = {}
+        try:
+            # Step a: old -> intermediate
+            for old_path_str, new_path_str in temp_audio_files_mapping.items():
+                if os.path.exists(old_path_str):
+                    temp_intermediate_path = old_path_str + ".tmp_rename"
+                    os.rename(old_path_str, temp_intermediate_path)
+                    intermediate_paths[temp_intermediate_path] = new_path_str
+                    self.log(f"AI劇場: リネーム準備 {old_path_str} -> {temp_intermediate_path}")
+
+            # Step b: intermediate -> new
+            for temp_path, final_new_path in intermediate_paths.items():
+                if os.path.exists(temp_path): # 念のため存在確認
+                    # new_path が既に存在する場合の処理 (通常は無いはずだが、衝突した場合)
+                    if os.path.exists(final_new_path):
+                        # ターゲットの final_new_path が、他のリネーム操作の中間ファイルである可能性も考慮する
+                        # (例: 1.wav -> 2.wav, 2.wav -> 3.wav の時、2.wav.tmp_rename が final_new_path になるケース)
+                        # ただし、現在のロジックでは中間ファイル名は .tmp_rename がつくので直接衝突はしにくい。
+                        # 純粋に予期せずファイルが存在する場合の処理。
+                        self.log(f"AI劇場: リネーム衝突警告 - ターゲットパス {final_new_path} は既に存在します。削除を試みます。")
+                        try:
+                            os.remove(final_new_path)
+                            self.log(f"AI劇場: 既存ファイル {final_new_path} を削除しました。")
+                        except OSError as e_del:
+                            self.log(f"AI劇場: 既存ファイル削除エラー {final_new_path}: {e_del}。リネームをスキップします。")
+                            # リネームできないので、中間ファイルを元に戻す
+                            original_old_path_for_temp = temp_path.replace(".tmp_rename", "")
+                            if os.path.exists(temp_path) and not os.path.exists(original_old_path_for_temp):
+                                 os.rename(temp_path, original_old_path_for_temp)
+                                 self.log(f"AI劇場: 中間ファイル {temp_path} を {original_old_path_for_temp} に戻しました。")
+                            continue # このファイルのリネームはスキップ
+
+                    os.rename(temp_path, final_new_path)
+                    self.log(f"AI劇場: リネーム成功 {temp_path} -> {final_new_path}")
+        except OSError as e_os: # より具体的なエラータイプ
+            self.log(f"AI劇場: 音声ファイルのリネーム中にOSエラー: {e_os} (errno: {e_os.errno}, strerror: {e_os.strerror}, filename: {e_os.filename}, filename2: {e_os.filename2})")
+            messagebox.showerror("リネームエラー", f"音声ファイルのリネーム中にエラーが発生しました: {e_os.strerror}")
+            # リネームに失敗した場合、中間ファイルを元に戻す試み (ベストエフォート)
+        except Exception as e: # その他の予期せぬエラー
+            self.log(f"AI劇場: 音声ファイルのリネーム中に予期せぬエラー: {e}")
+            messagebox.showerror("リネームエラー", f"音声ファイルのリネーム中に予期せぬエラーが発生しました: {e}")
+            # リネームに失敗した場合、中間ファイルを元に戻す試み (ベストエフォート)
+            for temp_path, final_new_path in intermediate_paths.items():
+                original_old_path = temp_path.replace(".tmp_rename", "")
+                if os.path.exists(temp_path) and not os.path.exists(original_old_path):
+                    try:
+                        os.rename(temp_path, original_old_path)
+                        self.log(f"AI劇場: リネームロールバック {temp_path} -> {original_old_path}")
+                    except Exception as e_rb:
+                         self.log(f"AI劇場: リネームロールバック失敗 {temp_path}: {e_rb}")
+            # この時点で処理を中断し、UIの再描画は行わないか、エラー状態を示す
+            return
+
+
+        # 3. Treeviewをクリアして再描画
+        for item in self.script_tree.get_children():
+            self.script_tree.delete(item)
+
+        newly_selected_item_id = None
+        for data_item in self.script_data:
+            item_id = self.script_tree.insert('', 'end', values=(
+                data_item['line'], data_item['action'], data_item['talker'], data_item['words'], data_item['status']
+            ))
+            if select_line_num_after_remap is not None and data_item['line'] == select_line_num_after_remap:
+                newly_selected_item_id = item_id
+
+        # 指定された行を選択状態にする
+        if newly_selected_item_id:
+            self.script_tree.selection_set(newly_selected_item_id)
+            self.script_tree.focus(newly_selected_item_id) # フォーカスも当てる
+            self.script_tree.see(newly_selected_item_id)   # 見えるようにスクロール
+
+        self.log("AI劇場: 行番号とUIを再マッピングしました。")
+
+
+    def move_script_line_up(self):
+        """選択された台本プレビューの行を1行上に移動する"""
+        selected_items = self.script_tree.selection()
+        if not selected_items:
+            messagebox.showwarning("選択なし", "移動する行を選択してください。")
+            return
+
+        selected_item_id = selected_items[0]
+        current_tree_index = self.script_tree.index(selected_item_id)
+
+        if current_tree_index == 0: # 既に一番上の場合
+            self.log("AI劇場: 選択行は既に一番上です。")
+            return
+
+        # script_data 内でのインデックスも Treeview のインデックスと一致しているはず
+        # (CSV読み込み時や追加時に順序通りに格納しているため)
+        # ただし、安全のため、行番号で script_data 内の要素を特定する
+        try:
+            tree_values = self.script_tree.item(selected_item_id, 'values')
+            if not tree_values or len(tree_values) == 0: return
+            current_line_num = int(tree_values[0])
+
+            # script_data から現在の行のインデックスを探す
+            current_data_index = -1
+            for idx, item_data in enumerate(self.script_data):
+                if item_data['line'] == current_line_num:
+                    current_data_index = idx
+                    break
+
+            if current_data_index == -1 or current_data_index == 0 : # データが見つからないか、既に先頭
+                self.log(f"AI劇場: 行移動(上)エラー。データインデックス: {current_data_index}")
+                return
+
+            # script_data の要素を入れ替え
+            item_to_move = self.script_data.pop(current_data_index)
+            self.script_data.insert(current_data_index - 1, item_to_move)
+
+            self.log(f"AI劇場: 行 {current_line_num} を1行上に移動しました。")
+            self._remap_script_lines_and_ui(select_line_num_after_remap=current_line_num -1) # 移動後の新しい行番号で選択
+
+        except (ValueError, TypeError, IndexError) as e:
+            self.log(f"AI劇場: 行を上に移動中にエラー: {e}")
+            messagebox.showerror("エラー", f"行の移動中にエラーが発生しました: {e}")
+
+
+    def move_script_line_down(self):
+        """選択された台本プレビューの行を1行下に移動する"""
+        selected_items = self.script_tree.selection()
+        if not selected_items:
+            messagebox.showwarning("選択なし", "移動する行を選択してください。")
+            return
+
+        selected_item_id = selected_items[0]
+        current_tree_index = self.script_tree.index(selected_item_id)
+        total_items = len(self.script_tree.get_children())
+
+        if current_tree_index == total_items - 1: # 既に一番下の場合
+            self.log("AI劇場: 選択行は既に一番下です。")
+            return
+
+        try:
+            tree_values = self.script_tree.item(selected_item_id, 'values')
+            if not tree_values or len(tree_values) == 0: return
+            current_line_num = int(tree_values[0])
+
+            current_data_index = -1
+            for idx, item_data in enumerate(self.script_data):
+                if item_data['line'] == current_line_num:
+                    current_data_index = idx
+                    break
+
+            if current_data_index == -1 or current_data_index == len(self.script_data) -1:
+                self.log(f"AI劇場: 行移動(下)エラー。データインデックス: {current_data_index}")
+                return
+
+            item_to_move = self.script_data.pop(current_data_index)
+            self.script_data.insert(current_data_index + 1, item_to_move)
+
+            self.log(f"AI劇場: 行 {current_line_num} を1行下に移動しました。")
+            self._remap_script_lines_and_ui(select_line_num_after_remap=current_line_num + 1)
+
+        except (ValueError, TypeError, IndexError) as e:
+            self.log(f"AI劇場: 行を下に移動中にエラー: {e}")
+            messagebox.showerror("エラー", f"行の移動中にエラーが発生しました: {e}")
+
+
+    def delete_selected_script_line(self):
+        """選択された台本プレビューの行を削除する"""
+        selected_items = self.script_tree.selection()
+        if not selected_items:
+            messagebox.showwarning("選択なし", "削除する行を選択してください。")
+            return
+
+        selected_item_id = selected_items[0]
+
+        try:
+            tree_values = self.script_tree.item(selected_item_id, 'values')
+            if not tree_values or len(tree_values) == 0: return
+            line_num_to_delete = int(tree_values[0])
+            action_to_delete = tree_values[1]
+            words_to_delete = tree_values[3]
+
+            if not messagebox.askyesno("削除確認", f"行 {line_num_to_delete} ({action_to_delete}: {words_to_delete[:20]}...) を削除しますか？\n関連する音声ファイルも削除されます。"):
+                return
+
+            # script_data から削除
+            original_length = len(self.script_data)
+            self.script_data = [item for item in self.script_data if item['line'] != line_num_to_delete]
+
+            if len(self.script_data) == original_length: # 削除対象が見つからなかった場合
+                messagebox.showerror("エラー", f"内部データで行 {line_num_to_delete} が見つかりませんでした。")
+                return
+
+            # 音声ファイルを削除
+            audio_file_to_delete = self._get_audio_filename(line_num_to_delete)
+            if os.path.exists(audio_file_to_delete):
+                try:
+                    os.remove(audio_file_to_delete)
+                    self.log(f"AI劇場: 音声ファイル {audio_file_to_delete} を削除しました。")
+                except FileNotFoundError:
+                    self.log(f"AI劇場: 削除対象の音声ファイルが見つかりませんでした: {audio_file_to_delete}")
+                except PermissionError as e_perm:
+                    self.log(f"AI劇場: 音声ファイル削除パーミッションエラー {audio_file_to_delete}: {e_perm}")
+                    messagebox.showwarning("ファイル削除エラー", f"音声ファイルの削除中にパーミッションエラーが発生しました。\n{e_perm}")
+                except OSError as e_os:
+                    self.log(f"AI劇場: 音声ファイル削除OSエラー {audio_file_to_delete}: {e_os}")
+                    messagebox.showwarning("ファイル削除エラー", f"音声ファイルの削除中にエラーが発生しました。\n{e_os}")
+                except Exception as e: # その他の予期せぬエラー
+                    self.log(f"AI劇場: 音声ファイル削除中に予期せぬエラー {audio_file_to_delete}: {e}")
+                    messagebox.showwarning("ファイル削除エラー", f"音声ファイルの削除中に予期せぬエラーが発生しました。\n{e}")
+
+            self.log(f"AI劇場: 行 {line_num_to_delete} を削除しました。")
+            self._remap_script_lines_and_ui() # UI再描画と行番号再割り当て、選択は解除される
+
+        except (ValueError, TypeError, IndexError) as e:
+            self.log(f"AI劇場: 行削除中にエラー: {e}")
+            messagebox.showerror("エラー", f"行の削除中にエラーが発生しました: {e}")
+
+
+    def play_selected_line_audio(self):
+        """選択された行の音声を再生する。なければ生成を促す。"""
+        selected_items = self.script_tree.selection()
+        if not selected_items:
+            messagebox.showwarning("選択なし", "再生する行を選択してください。")
+            return
+
+        selected_item_id = selected_items[0]
+        try:
+            tree_values = self.script_tree.item(selected_item_id, 'values')
+            if not tree_values or len(tree_values) == 0: return
+            line_num = int(tree_values[0])
+            status = tree_values[4]
+
+            audio_file_path = self._get_audio_filename(line_num)
+
+            if os.path.exists(audio_file_path):
+                self.log(f"AI劇場: 行 {line_num} の音声ファイル {audio_file_path} を再生します。")
+
+                def run_play():
+                    loop = asyncio.new_event_loop()
+                    asyncio.set_event_loop(loop)
+                    try:
+                        # play_audio_file は単一ファイルを再生し、削除しないことを前提
+                        loop.run_until_complete(self.audio_player.play_audio_file(str(audio_file_path)))
+                        self.log(f"AI劇場: 行 {line_num} の再生完了。")
+                        # 再生後にステータスを「再生済」にするかはオプション
+                        # self.root.after(0, self._update_script_tree_status, line_num, "再生済")
+                    except Exception as e_play:
+                        self.log(f"AI劇場: 音声再生エラー (行 {line_num}): {e_play}")
+                        messagebox.showerror("再生エラー", f"音声の再生中にエラーが発生しました: {e_play}")
+                    finally:
+                        loop.close()
+                threading.Thread(target=run_play, daemon=True).start()
+            else:
+                self.log(f"AI劇場: 行 {line_num} の音声ファイルが見つかりません。ステータス: {status}")
+                if status == "未生成" or status == "失敗" or status == "エラー":
+                    messagebox.showinfo("音声未生成", f"行 {line_num} の音声はまだ生成されていません。\n「選択行の音声生成」ボタンで生成してください。")
+                else: # "成功" や "ファイルなし" の場合もファイルがないのはおかしい
+                    messagebox.showwarning("ファイルなし", f"行 {line_num} の音声ファイルが見つかりませんでした。\n再度音声生成をお試しください。")
+
+        except (ValueError, TypeError, IndexError) as e:
+            self.log(f"AI劇場: 音声再生準備中にエラー: {e}")
+            messagebox.showerror("エラー", f"音声再生の準備中にエラーが発生しました: {e}")
+
+
+    def export_script_to_csv(self):
+        """現在の台本プレビューの内容をCSVファイルとしてエクスポートする"""
+        if not self.script_data:
+            messagebox.showinfo("エクスポート不可", "エクスポートする台本データがありません。")
+            return
+
+        filepath = filedialog.asksaveasfilename(
+            title="CSV台本を名前を付けて保存",
+            defaultextension=".csv",
+            filetypes=(("CSVファイル", "*.csv"), ("すべてのファイル", "*.*"))
+        )
+        if not filepath:
+            return
+
+        try:
+            with open(filepath, 'w', newline='', encoding='utf-8') as csvfile:
+                fieldnames = ['action', 'talker', 'words'] # CSVScriptDefinitions.md に従う
+                writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
+                writer.writeheader()
+
+                for line_data in self.script_data:
+                    # 行番号やステータスはエクスポートしない
+                    row_to_write = {
+                        'action': line_data['action'],
+                        'talker': line_data['talker'],
+                        'words': line_data['words']
+                    }
+                    writer.writerow(row_to_write)
+
+            self.log(f"AI劇場: 台本をCSVファイルにエクスポートしました: {filepath}")
+            messagebox.showinfo("エクスポート完了", f"台本をCSVファイルに保存しました。\n{filepath}")
+        except Exception as e:
+            self.log(f"AI劇場: CSVエクスポート中にエラー: {e}")
+            messagebox.showerror("エクスポートエラー", f"CSVファイルのエクスポート中にエラーが発生しました: {e}")
+
 
     def load_csv_script(self):
         """CSV台本ファイルを読み込み、内容をパースしてUIに表示する"""
@@ -2726,12 +3435,24 @@ class AITuberMainGUI:
                         audio_files = await voice_engine_instance.synthesize_speech(text_to_speak, model, speed)
 
                 if audio_files and os.path.exists(audio_files[0]):
-                    # 生成された一時ファイルを指定のパスに移動/コピー
-                    # 既存のファイルを上書きするために shutil.move を使用
                     import shutil
-                    shutil.move(audio_files[0], output_wav_path)
-                    self.log(f"AI劇場: 音声ファイル生成成功: {output_wav_path}")
-                    return True
+                    try:
+                        # 移動先にファイルが既に存在する場合、shutil.moveは上書きする (Python 3.9+では上書きしない場合がある os.replace の方が良いかも)
+                        # より安全に上書きするために、一度削除してからmoveするか、os.replaceを使用
+                        if os.path.exists(output_wav_path):
+                            os.remove(output_wav_path) # 既存ファイルを削除
+                        shutil.move(audio_files[0], output_wav_path)
+                        self.log(f"AI劇場: 音声ファイル生成成功: {output_wav_path}")
+                        return True
+                    except (shutil.Error, OSError) as e_move:
+                        self.log(f"AI劇場: 音声ファイル移動エラー (shutil.move from {audio_files[0]} to {output_wav_path}): {e_move}")
+                        # 移動に失敗した場合、一時ファイルが残っている可能性があるので削除を試みる
+                        if os.path.exists(audio_files[0]):
+                            try:
+                                os.remove(audio_files[0])
+                            except OSError as e_del_temp:
+                                self.log(f"AI劇場: 一時音声ファイル削除エラー: {e_del_temp}")
+                        return False
                 else:
                     self.log(f"AI劇場: 音声ファイル生成失敗 (ファイルなし): 行{line_num}")
                     return False
@@ -2749,14 +3470,20 @@ class AITuberMainGUI:
                     sampwidth = 2 # 16-bit
                     num_frames = int(framerate * duration_seconds)
                     silence = b'\x00\x00' * num_frames # 16-bit zero samples
-
-                    with wave.open(str(output_wav_path), 'wb') as wf:
-                        wf.setnchannels(channels)
-                        wf.setsampwidth(sampwidth)
-                        wf.setframerate(framerate)
-                        wf.writeframes(silence)
-                    self.log(f"AI劇場: 無音ファイル作成成功 ({duration_seconds}秒): {output_wav_path}")
-                    return True
+                    try:
+                        with wave.open(str(output_wav_path), 'wb') as wf:
+                            wf.setnchannels(channels)
+                            wf.setsampwidth(sampwidth)
+                            wf.setframerate(framerate)
+                            wf.writeframes(silence)
+                        self.log(f"AI劇場: 無音ファイル作成成功 ({duration_seconds}秒): {output_wav_path}")
+                        return True
+                    except wave.Error as e_wave:
+                        self.log(f"AI劇場: 無音WAVファイル書き込みエラー (wave.open for {output_wav_path}): {e_wave}")
+                        return False
+                    except OSError as e_os:
+                        self.log(f"AI劇場: 無音WAVファイル書き込みOSエラー (wave.open for {output_wav_path}): {e_os}")
+                        return False
                 except ValueError:
                     self.log(f"AI劇場: waitアクションの秒数指定が不正です: {words}")
                     messagebox.showerror("書式エラー", f"waitアクションの秒数指定が不正です: {words}\n行 {line_num}")
@@ -3113,7 +3840,7 @@ class AITuberMainGUI:
         self.character_combo.bind('<<ComboboxSelected>>', self.on_character_changed)
         
         ttk.Button(char_control_frame, text="🔄 更新", 
-                  command=self.refresh_character_list).pack(side=tk.LEFT, padx=5)
+                  command=lambda: [self.refresh_character_list(), self.populate_ai_theater_talker_dropdown()]).pack(side=tk.LEFT, padx=5) # AI劇場話者リストも更新
         ttk.Button(char_control_frame, text="⚙️ 設定", 
                   command=self.open_selected_character_editor).pack(side=tk.LEFT, padx=5)
         
@@ -3706,6 +4433,7 @@ class AITuberMainGUI:
             dialog = CharacterEditDialog(self.root, self.character_manager, char_id, char_data)
             if dialog.result:
                 self.refresh_character_list() # キャラクターリストを更新
+                self.populate_ai_theater_talker_dropdown() # AI劇場の話者リストも更新
                 # メインタブのコンボボックスの表示も更新する必要があるか確認
                 # 名前が変更された場合、コンボボックスの表示も追従させると親切
                 new_name = dialog.result['name']
@@ -3779,6 +4507,7 @@ class AITuberMainGUI:
         
         # キャラクター一覧更新
         self.refresh_character_list()
+        self.populate_ai_theater_talker_dropdown() # AI劇場の話者リストも初期化
         
         # 利用可能なキャラクターがある場合は最初のものを自動選択
         characters = self.config.get_all_characters()
@@ -3946,6 +4675,7 @@ class AITuberMainGUI:
         dialog = CharacterEditDialog(self.root, self.character_manager)
         if dialog.result:
             self.refresh_character_list()
+            self.populate_ai_theater_talker_dropdown() # AI劇場の話者リストも更新
             action = dialog.result.get('action', 'created')
             name = dialog.result['name']
             char_id = dialog.result['char_id']
@@ -3975,6 +4705,7 @@ class AITuberMainGUI:
         dialog = CharacterEditDialog(self.root, self.character_manager, char_id, char_data)
         if dialog.result:
             self.refresh_character_list()
+            self.populate_ai_theater_talker_dropdown() # AI劇場の話者リストも更新
             self.log(f"✏️ キャラクター '{dialog.result['name']}' を編集")
     
     def duplicate_character(self):
@@ -4011,6 +4742,7 @@ class AITuberMainGUI:
                 )
                 
                 self.refresh_character_list()
+                self.populate_ai_theater_talker_dropdown() # AI劇場の話者リストも更新
                 self.log(f"📋 キャラクター '{new_name}' を複製")
                 
         except Exception as e:
@@ -4045,6 +4777,7 @@ class AITuberMainGUI:
                         self.character_status.config(text="キャラクター: 未選択")
                     
                     self.refresh_character_list()
+                    self.populate_ai_theater_talker_dropdown() # AI劇場の話者リストも更新
                     self.log(f"🗑️ キャラクター '{char_name}' を削除")
                 else:
                     messagebox.showerror("削除エラー", "キャラクターの削除に失敗しました")
