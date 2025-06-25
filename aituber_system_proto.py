@@ -2538,6 +2538,7 @@ class AITuberMainGUI:
         top_frame.pack(fill=tk.X, padx=10, pady=5)
 
         ttk.Button(top_frame, text="📜 CSV台本読み込み", command=self.load_csv_script).pack(side=tk.LEFT, padx=5)
+        ttk.Button(top_frame, text="✨ 新規CSV台本作成", command=self.create_new_csv_script).pack(side=tk.LEFT, padx=5) # 新規ボタン追加
         self.loaded_csv_label = ttk.Label(top_frame, text="CSVファイル: 未読み込み")
         self.loaded_csv_label.pack(side=tk.LEFT, padx=10)
 
@@ -3296,14 +3297,18 @@ class AITuberMainGUI:
             messagebox.showerror("エクスポートエラー", f"CSVファイルのエクスポート中にエラーが発生しました: {e}")
 
 
-    def load_csv_script(self):
-        """CSV台本ファイルを読み込み、内容をパースしてUIに表示する"""
-        filepath = filedialog.askopenfilename(
-            title="CSV台本ファイルを選択",
-            filetypes=(("CSVファイル", "*.csv"), ("すべてのファイル", "*.*"))
-        )
-        if not filepath:
-            return
+    def load_csv_script(self, filepath=None):
+        """CSV台本ファイルを読み込み、内容をパースしてUIに表示する。filepathが指定されていればそれを使用する。"""
+        if filepath is None:
+            filepath = filedialog.askopenfilename(
+                title="CSV台本ファイルを選択",
+                filetypes=(("CSVファイル", "*.csv"), ("すべてのファイル", "*.*"))
+            )
+            if not filepath:
+                self.log("AI劇場: CSV台本ファイルの選択がキャンセルされました。")
+                return
+        else:
+            self.log(f"AI劇場: 指定されたCSV台本ファイルを読み込みます: {filepath}")
 
         self.current_script_path = filepath
         self.script_data = []
@@ -6192,6 +6197,61 @@ class AITuberMainGUI:
                 self.root.destroy()
         else:
             self.root.destroy()
+
+    def create_new_csv_script(self):
+        """新規CSV台本を作成し、関連フォルダも準備する"""
+        self.log("AI劇場: 新規CSV台本作成処理を開始。")
+        filepath = filedialog.asksaveasfilename(
+            title="新規CSV台本を名前を付けて保存",
+            defaultextension=".csv",
+            filetypes=(("CSVファイル", "*.csv"), ("すべてのファイル", "*.*"))
+        )
+
+        if not filepath:
+            self.log("AI劇場: 新規CSV台本作成がキャンセルされました。")
+            return
+
+        try:
+            # ヘッダーのみのCSVファイルを作成
+            with open(filepath, 'w', newline='', encoding='utf-8') as csvfile:
+                writer = csv.writer(csvfile)
+                writer.writerow(['action', 'talker', 'words'])
+            self.log(f"AI劇場: 新規CSVファイルを作成しました: {filepath}")
+
+            # 音声保存フォルダの作成
+            script_filename = Path(filepath).stem
+            audio_output_folder = Path(filepath).parent / f"{script_filename}_audio"
+            audio_output_folder.mkdir(parents=True, exist_ok=True)
+            self.log(f"AI劇場: 音声保存フォルダを作成/確認しました: {audio_output_folder}")
+
+            # 作成したCSVを読み込む準備 (ステップ3でload_csv_scriptを呼び出す)
+            self.current_script_path = filepath
+            self.audio_output_folder = audio_output_folder
+
+            # この後、ステップ3で self.load_csv_script() を呼び出すことになるが、
+            # load_csv_script は現在ファイルダイアログを開くようになっている。
+            # 引数でファイルパスを受け取れるようにするか、
+            # self.current_script_path を参照するように load_csv_script を修正する必要がある。
+            # ここでは、load_csv_script が self.current_script_path を直接使うように変更する前提で進める。
+            # (または、load_csv_scriptを呼び出す前に、その中でファイルダイアログをスキップするフラグを立てるなど)
+
+            # UIの更新と0件データの読み込みは次のステップで行う
+            # messagebox.showinfo("新規CSV作成完了", f"新規CSV台本ファイルと音声フォルダを作成しました。\nファイル: {filepath}\nフォルダ: {audio_output_folder}")
+            # load_csv_script を呼び出すことで、UIの更新とメッセージ表示が行われる
+            self.load_csv_script(filepath)
+            if self.current_script_path: # load_csv_scriptが成功したか（current_script_pathが設定されたか）で判断
+                self.log(f"AI劇場: 新規作成したCSV '{filepath}' の読み込みが完了しました。")
+                messagebox.showinfo("新規CSV作成完了", f"新規CSV台本ファイルと音声フォルダを作成し、読み込みました。\nファイル: {filepath}\nフォルダ: {audio_output_folder}")
+            else:
+                # load_csv_script内でエラーが発生した場合、current_script_path が None になっている可能性がある
+                self.log(f"AI劇場: 新規作成したCSV '{filepath}' の読み込みに失敗しました。")
+                # エラーメッセージは load_csv_script 内で表示されているはずなので、ここでは追加しない。
+
+        except Exception as e:
+            self.log(f"AI劇場: 新規CSV台本作成中にエラー: {e}")
+            messagebox.showerror("作成エラー", f"新規CSV台本の作成中にエラーが発生しました: {e}")
+            self.current_script_path = None
+            self.audio_output_folder = None
     
     def run(self):
         """アプリケーションのメインループを開始"""
