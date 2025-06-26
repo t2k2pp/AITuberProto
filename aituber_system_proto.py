@@ -63,12 +63,27 @@ class ConfigManager:
         try:
             if os.path.exists(self.config_file):
                 with open(self.config_file, 'r', encoding='utf-8') as f:
-                    return json.load(f)
+                    config_data = json.load(f)
+                    # local_llm_endpoint_url の互換性対応
+                    if "system_settings" in config_data and \
+                       "local_llm_endpoint_url" not in config_data["system_settings"]:
+                        config_data["system_settings"]["local_llm_endpoint_url"] = ""
+                    return config_data
             else:
-                return self.create_default_config()
+                # 新規作成時もデフォルトに関わらずキーが含まれるようにする
+                config_data = self.create_default_config()
+                if "system_settings" in config_data and \
+                   "local_llm_endpoint_url" not in config_data["system_settings"]:
+                       config_data["system_settings"]["local_llm_endpoint_url"] = ""
+                return config_data
         except Exception as e:
             print(f"設定読み込みエラー: {e}")
-            return self.create_default_config()
+            # エラー時もデフォルト設定を返す前に、local_llm_endpoint_url を確認・追加する
+            config_data = self.create_default_config()
+            if "system_settings" in config_data and \
+               "local_llm_endpoint_url" not in config_data["system_settings"]:
+                 config_data["system_settings"]["local_llm_endpoint_url"] = ""
+            return config_data
     
     def create_default_config(self):
         """デフォルト設定を作成（v2.2完全版）"""
@@ -83,7 +98,8 @@ class ConfigManager:
                 "cost_mode": "free",
                 "conversation_history_length": 0, # 会話履歴の保持数 (0は記憶なし、1以上でその回数分の直近の会話を記憶)
                 "text_generation_model": "gemini-1.5-flash-latest", # デフォルトのテキスト生成モデルを更新
-                "ai_chat_processing_mode": "sequential" # "sequential" または "parallel"
+                "ai_chat_processing_mode": "sequential", # "sequential" または "parallel"
+                "local_llm_endpoint_url": "" # LM StudioなどのローカルLLMのエンドポイントURL
             },
             "characters": {},
             "streaming_settings": {
@@ -2918,14 +2934,31 @@ class AITuberMainGUI:
 
             full_prompt = f"{ai_prompt}\n\n以下はこれまでの会話です:\n{history_str}\n\n{user_char_name}: {user_input}\n\nあなた ({ai_char_name}):"
 
-            selected_model = self.config.get_system_setting("text_generation_model", "gemini-1.5-flash")
-            response = client.models.generate_content(
-                model=selected_model,
-                contents=full_prompt,
-                config=genai.types.GenerateContentConfig(temperature=0.8, max_output_tokens=200)
-            )
+            selected_model_internal_name = self.config.get_system_setting("text_generation_model", "gemini-1.5-flash")
+            local_llm_url = self.config.get_system_setting("local_llm_endpoint_url", "")
+            ai_response_text = ""
 
-            ai_response_text = response.text.strip() if response.text else "うーん、ちょっとうまく答えられないみたいです。"
+            if selected_model_internal_name == "local_lm_studio":
+                if not local_llm_url:
+                    self.log("❌ AIチャット: ローカルLLMエンドポイントURLが設定されていません。")
+                    ai_response_text = "ローカルLLMのエンドポイントURLが未設定です。設定タブで確認してください。"
+                else:
+                    loop = asyncio.new_event_loop()
+                    asyncio.set_event_loop(loop)
+                    try:
+                        ai_response_text = loop.run_until_complete(
+                            self._generate_response_local_llm(full_prompt, local_llm_url, ai_char_name)
+                        )
+                    finally:
+                        loop.close()
+            else:
+                # Google AI Studio (Gemini) を使用
+                gemini_response_obj = client.models.generate_content(
+                    model=selected_model_internal_name,
+                    contents=full_prompt,
+                    config=genai.types.GenerateContentConfig(temperature=0.8, max_output_tokens=200)
+                )
+                ai_response_text = gemini_response_obj.text.strip() if gemini_response_obj.text else "うーん、ちょっとうまく答えられないみたいです。"
 
             # AI応答の表示と保存
             self.root.after(0, self._add_message_to_chat_display, f"🤖 {ai_char_name}", ai_response_text)
@@ -4807,10 +4840,25 @@ class AITuberMainGUI:
         self.text_generation_model_var = tk.StringVar()
         self.text_generation_model_combo = ttk.Combobox(
             api_grid, textvariable=self.text_generation_model_var,
-            values=self._get_display_gemini_models(), # 表示用リスト生成メソッドを使用
+            values=self._get_display_text_generation_models(), # 変更: 新しいメソッドを使用
             state="readonly", width=47
         )
         self.text_generation_model_combo.grid(row=2, column=1, padx=10, pady=2, sticky=tk.W)
+        self.text_generation_model_combo.bind('<<ComboboxSelected>>', self._on_text_generation_model_changed) # イベントハンドラをバインド
+
+        # ローカルLLMエンドポイントURL入力フィールド (最初は非表示)
+        self.local_llm_endpoint_label = ttk.Label(api_grid, text="LM Studio エンドポイントURL:")
+        self.local_llm_endpoint_label.grid(row=3, column=0, sticky=tk.W, pady=2)
+        self.local_llm_endpoint_label.grid_remove() # 初期状態は非表示
+
+        self.local_llm_endpoint_url_var = tk.StringVar()
+        self.local_llm_endpoint_entry = ttk.Entry(api_grid, textvariable=self.local_llm_endpoint_url_var, width=50)
+        self.local_llm_endpoint_entry.grid(row=3, column=1, padx=10, pady=2, sticky=tk.W)
+        self.local_llm_endpoint_entry.grid_remove() # 初期状態は非表示
+
+        self.local_llm_endpoint_hint_label = ttk.Label(api_grid, text="例: http://127.0.0.1:1234/v1/chat/completions のように完全なパスを入力", foreground="gray")
+        self.local_llm_endpoint_hint_label.grid(row=4, column=1, sticky=tk.W, padx=10, pady=(0, 5)) # row を変更し、適切な位置に配置
+        self.local_llm_endpoint_hint_label.grid_remove() # 初期状態は非表示
 
         # AIチャット設定フレーム (新規追加)
         ai_chat_settings_frame = ttk.LabelFrame(settings_frame, text="AIチャット設定", padding="10")
@@ -5017,7 +5065,7 @@ class AITuberMainGUI:
     def _get_display_gemini_models(self):
         """UI表示用のGeminiモデル名リストを生成（注釈付き）"""
         display_models = []
-        for model_name in self.available_gemini_models:
+        for model_name in self.available_gemini_models: # self.available_gemini_models は __init__ で定義済み
             display_name = model_name
             if model_name == "gemini-2.5-flash":
                 display_name += " (プレビュー)"
@@ -5026,13 +5074,35 @@ class AITuberMainGUI:
             display_models.append(display_name)
         return display_models
 
-    def _get_internal_gemini_model_name(self, display_name):
-        """UI表示名から内部的なGeminiモデル名を取得"""
+    def _get_display_text_generation_models(self):
+        """UI表示用のテキスト生成モデル名リストを生成（ローカルLLMを含む）"""
+        gemini_models = self._get_display_gemini_models()
+        return ["LM Studio (Local)"] + gemini_models
+
+    def _get_internal_text_generation_model_name(self, display_name):
+        """UI表示名から内部的なテキスト生成モデル名を取得"""
+        if display_name == "LM Studio (Local)":
+            return "local_lm_studio" # ローカルLLMを示す内部名
+        # それ以外はGeminiモデルとして処理 (元々の _get_internal_gemini_model_name のロジック)
         if display_name.endswith(" (プレビュー)"):
             return display_name.replace(" (プレビュー)", "")
         elif display_name.endswith(" (プレビュー - クォータ注意)"):
             return display_name.replace(" (プレビュー - クォータ注意)", "")
         return display_name
+
+    def _on_text_generation_model_changed(self, event=None):
+        """テキスト生成モデルの選択が変更されたときの処理 (UI表示制御)"""
+        selected_model_display_name = self.text_generation_model_var.get()
+        if selected_model_display_name == "LM Studio (Local)":
+            # ローカルLLMが選択された場合、エンドポイントURL入力フィールドとヒントラベルを表示
+            self.local_llm_endpoint_label.grid()
+            self.local_llm_endpoint_entry.grid()
+            self.local_llm_endpoint_hint_label.grid()
+        else:
+            # それ以外の場合、エンドポイントURL入力フィールドとヒントラベルを非表示
+            self.local_llm_endpoint_label.grid_remove()
+            self.local_llm_endpoint_entry.grid_remove()
+            self.local_llm_endpoint_hint_label.grid_remove()
 
     def populate_audio_output_devices(self):
         """音声出力デバイスのドロップダウンメニューを初期化する"""
@@ -5130,18 +5200,24 @@ class AITuberMainGUI:
         self.voice_engine_var.set(self.config.get_system_setting("voice_engine", "avis_speech"))
         
         # テキスト生成モデル設定の読み込み
-        internal_model_name = self.config.get_system_setting("text_generation_model", self._get_internal_gemini_model_name(self._get_display_gemini_models()[0]) if self._get_display_gemini_models() else "")
-
-        display_name_to_set = internal_model_name # デフォルトは内部名
-        for display_name in self._get_display_gemini_models():
-            if self._get_internal_gemini_model_name(display_name) == internal_model_name:
-                display_name_to_set = display_name
+        internal_model_name_from_config = self.config.get_system_setting("text_generation_model", "gemini-1.5-flash-latest") # デフォルトを適切なGeminiモデルに
+        display_name_to_set = ""
+        # 設定ファイル上の内部名と一致する表示名をUIモデルリストから探す
+        for dn in self._get_display_text_generation_models(): # 新しいメソッドを使用
+            if self._get_internal_text_generation_model_name(dn) == internal_model_name_from_config:
+                display_name_to_set = dn
                 break
 
-        if display_name_to_set in self._get_display_gemini_models():
+        if display_name_to_set:
             self.text_generation_model_var.set(display_name_to_set)
-        elif self._get_display_gemini_models(): # フォールバック
-            self.text_generation_model_var.set(self._get_display_gemini_models()[0])
+        elif self._get_display_text_generation_models(): # フォールバックでリストの最初のものを設定
+            self.text_generation_model_var.set(self._get_display_text_generation_models()[0])
+
+        # ローカルLLMエンドポイントURLの読み込み
+        self.local_llm_endpoint_url_var.set(self.config.get_system_setting("local_llm_endpoint_url", ""))
+
+        # テキスト生成モデル変更時のUI更新処理を呼び出し、エンドポイントURLフィールドの表示を初期化
+        self._on_text_generation_model_changed()
 
         # AIチャット処理方式の読み込み (新規追加)
         ai_chat_mode = self.config.get_system_setting("ai_chat_processing_mode", "sequential")
@@ -5200,8 +5276,14 @@ class AITuberMainGUI:
 
             # UI表示名から内部モデル名を取得して保存
             selected_display_name = self.text_generation_model_var.get()
-            internal_model_name = self._get_internal_gemini_model_name(selected_display_name)
+            internal_model_name = self._get_internal_text_generation_model_name(selected_display_name) # 修正: 正しいメソッド呼び出し
             self.config.set_system_setting("text_generation_model", internal_model_name)
+
+            # ローカルLLMエンドポイントURLの保存
+            if internal_model_name == "local_lm_studio":
+                self.config.set_system_setting("local_llm_endpoint_url", self.local_llm_endpoint_url_var.get())
+            else:
+                self.config.set_system_setting("local_llm_endpoint_url", "") # ローカルLLM以外なら空を保存
 
             # AIチャット処理方式の保存 (新規追加)
             selected_chat_mode_display = self.ai_chat_processing_mode_var.get()
@@ -5761,21 +5843,39 @@ class AITuberMainGUI:
             full_prompt = f"{char_prompt}\n\n{history_str}\n\nユーザー: {message}\n\n{char_name}として、自然で親しみやすい返答をしてください。" # AIの発言者名を明示
             
             # response = model.generate_content(full_prompt) # 旧方式
-            selected_model = self.config.get_system_setting("text_generation_model", "gemini-1.5-flash")
-            text_response = client.models.generate_content(
-                model=selected_model, # 設定から読み込んだモデルを使用
-                contents=full_prompt,
-                config=genai.types.GenerateContentConfig( # 引数名を config に修正
-                    temperature=0.9,
-                    max_output_tokens=150
-                )
-            )
+            selected_model_internal_name = self.config.get_system_setting("text_generation_model", "gemini-1.5-flash")
+            local_llm_url = self.config.get_system_setting("local_llm_endpoint_url", "")
+            ai_response = ""
 
-            if text_response.text is None:
-                self.log(f"⚠️ AI応答がNoneでした (モデル: {selected_model})。")
-                ai_response = "ごめんなさい、ちょっと考えがまとまりませんでした。"
+            if selected_model_internal_name == "local_lm_studio":
+                if not local_llm_url:
+                    self.log("❌ AI対話テスト: ローカルLLMエンドポイントURLが設定されていません。")
+                    ai_response = "ローカルLLMのエンドポイントURLが未設定です。設定タブで確認してください。"
+                else:
+                    # _generate_response_local_llm は async なので、新しいイベントループで実行
+                    loop = asyncio.new_event_loop()
+                    asyncio.set_event_loop(loop)
+                    try:
+                        ai_response = loop.run_until_complete(
+                            self._generate_response_local_llm(full_prompt, local_llm_url, char_name)
+                        )
+                    finally:
+                        loop.close()
             else:
-                ai_response = text_response.text.strip()
+                # Google AI Studio (Gemini) を使用
+                gemini_response_obj = client.models.generate_content( # text_response から変更
+                    model=selected_model_internal_name,
+                    contents=full_prompt,
+                    config=genai.types.GenerateContentConfig(
+                        temperature=0.9,
+                        max_output_tokens=150
+                    )
+                )
+                if gemini_response_obj.text is None: # gemini_response_obj を使用
+                    self.log(f"⚠️ AI応答がNoneでした (モデル: {selected_model_internal_name})。")
+                    ai_response = "ごめんなさい、ちょっと考えがまとまりませんでした。"
+                else:
+                    ai_response = gemini_response_obj.text.strip() # gemini_response_obj を使用
             
             # GUI更新
             self.root.after(0, lambda: self.chat_display.insert(tk.END, f"🤖 {char_name}: {ai_response}\n"))
@@ -6880,6 +6980,56 @@ class AITuberMainGUI:
         else:
             self.root.destroy()
 
+    async def _generate_response_local_llm(self, prompt_text: str, endpoint_url: str, char_name_for_log: str = "LocalLLM") -> str:
+        """ローカルLLM（LM Studio想定）から応答を生成する非同期メソッド"""
+        self.log(f"🤖 {char_name_for_log}: ローカルLLM ({endpoint_url}) にリクエスト送信中...")
+
+        payload = {
+            "model": "local-model",
+            "messages": [{"role": "user", "content": prompt_text}],
+            "temperature": 0.7,
+            "max_tokens": 200
+        }
+        headers = {"Content-Type": "application/json"}
+        # LM StudioはAPIキーを必要としないことが多いので、Authorizationヘッダーは含めない
+
+        try:
+            async with aiohttp.ClientSession() as session:
+                async with session.post(endpoint_url, json=payload, headers=headers, timeout=aiohttp.ClientTimeout(total=120)) as response:
+                    response_text_for_error = await response.text() # エラーログ用に先読み
+                    response.raise_for_status()  # HTTPエラーがあれば例外を発生
+
+                    response_data = json.loads(response_text_for_error) # 先読みしたテキストをパース
+
+                    if response_data.get("choices") and isinstance(response_data["choices"], list) and len(response_data["choices"]) > 0:
+                        message = response_data["choices"][0].get("message")
+                        if message and isinstance(message, dict) and "content" in message:
+                            generated_text = message["content"].strip()
+                            self.log(f"🤖 {char_name_for_log}: ローカルLLMからの応答取得成功。")
+                            return generated_text
+                        else:
+                            self.log(f"❌ {char_name_for_log}: ローカルLLM応答形式エラー - message.content が見つかりません。Response: {response_data}")
+                            return "ローカルLLMからの応答形式が正しくありませんでした (message.contentなし)。"
+                    else:
+                        self.log(f"❌ {char_name_for_log}: ローカルLLM応答形式エラー - choices が見つかりません。Response: {response_data}")
+                        return "ローカルLLMからの応答形式が正しくありませんでした (choicesなし)。"
+
+        except aiohttp.ClientConnectorError as e:
+            self.log(f"❌ {char_name_for_log}: ローカルLLM接続エラー ({endpoint_url}): {e}")
+            return f"ローカルLLM ({endpoint_url}) に接続できませんでした。LM Studioが起動しているか、URLを確認してください。"
+        except aiohttp.ClientResponseError as e:
+            self.log(f"❌ {char_name_for_log}: ローカルLLM APIエラー ({endpoint_url}) - Status: {e.status}, Message: {e.message}, Response: {response_text_for_error}")
+            return f"ローカルLLM APIからエラー応答がありました (ステータス: {e.status})。詳細はログを確認してください。"
+        except asyncio.TimeoutError: # aiohttp.ClientTimeout は asyncio.TimeoutError を発生させる
+            self.log(f"❌ {char_name_for_log}: ローカルLLM応答タイムアウト ({endpoint_url})。")
+            return "ローカルLLMからの応答がタイムアウトしました。"
+        except json.JSONDecodeError as e_json: # json.loads() が失敗した場合
+            self.log(f"❌ {char_name_for_log}: ローカルLLM応答のJSONデコードエラー ({endpoint_url}): {e_json}. Response Text: {response_text_for_error}")
+            return "ローカルLLMからの応答をJSONとして解析できませんでした。"
+        except Exception as e_generic:
+            self.log(f"❌ {char_name_for_log}: ローカルLLM呼び出し中に予期せぬエラー ({endpoint_url}): {e_generic}\n{traceback.format_exc()}")
+            return "ローカルLLMの呼び出し中に予期せぬエラーが発生しました。"
+
     def create_new_csv_script(self):
         """新規CSV台本を作成し、関連フォルダも準備する"""
         self.log("AI劇場: 新規CSV台本作成処理を開始。")
@@ -6971,34 +7121,53 @@ class AITuberStreamingSystem:
         self.viewer_memory = {}
         self.running = False
         self.chat_history = [] # 会話履歴を保存するリスト
-        self.available_gemini_models = [
-            "gemini-1.5-flash",
-            "gemini-1.5-flash-latest",
-            "gemini-1.5-pro",
-            "gemini-1.5-pro-latest",
-            # "gemini-2.0-flash", # APIドキュメントに記載なし (2024/03時点)
-            # "gemini-2.0-pro",   # APIドキュメントに記載なし (2024/03時点)
-            # "gemini-2.5-flash-lite", # v1beta generateContent で未対応のため削除 (2024/06/24確認)
-            "gemini-2.5-flash",
-            "gemini-2.5-pro"      # 仮追加 (APIでの利用可否とプレビュー状況の確認が必要)
-        ]
-        # モデル名のソート (バージョン、精度の順)
-        # 簡単なソートキー関数を定義
-        def sort_key_gemini(model_name):
-            parts = model_name.split('-')
-            version_str = parts[1] # "1.5", "2.5"など
-            try:
-                version_major = float(version_str)
-            except ValueError:
-                version_major = 0 # エラーの場合は先頭に
+        # self.available_gemini_models の定義とソート処理は AITuberMainGUI にあるべきものなので、ここからは完全に削除。
 
-            precision_order = {"lite": 0, "flash": 1, "pro": 2}
-            precision_val = precision_order.get(parts[2] if len(parts) > 2 else (parts[0] if parts[0] in precision_order else "flash"), 1)
+    async def _generate_response_local_llm_streaming(self, prompt_text: str, endpoint_url: str, char_name_for_log: str = "LocalLLMStream") -> str:
+        """ローカルLLM（LM Studio想定）から応答を生成する非同期メソッド (ストリーミングシステム用)"""
+        self.log(f"🤖 {char_name_for_log}: ローカルLLM ({endpoint_url}) にリクエスト送信中...")
 
-            is_latest = "latest" in model_name
-            return (version_major, precision_val, is_latest)
+        payload = {
+            "model": "local-model",
+            "messages": [{"role": "user", "content": prompt_text}],
+            "temperature": 0.7,
+            "max_tokens": 100 # ストリーミング用途なので短め
+        }
+        headers = {"Content-Type": "application/json"}
 
-        self.available_gemini_models.sort(key=sort_key_gemini)
+        try:
+            async with aiohttp.ClientSession() as session:
+                async with session.post(endpoint_url, json=payload, headers=headers, timeout=aiohttp.ClientTimeout(total=60)) as response: # タイムアウトを60秒に
+                    response_text_for_error = await response.text() # エラーログ用に先読み
+                    response.raise_for_status()
+
+                    response_data = json.loads(response_text_for_error)
+
+                    if response_data.get("choices") and isinstance(response_data["choices"], list) and len(response_data["choices"]) > 0:
+                        message = response_data["choices"][0].get("message")
+                        if message and isinstance(message, dict) and "content" in message:
+                            generated_text = message["content"].strip()
+                            self.log(f"🤖 {char_name_for_log}: ローカルLLMからの応答取得成功。")
+                            return generated_text
+
+                    self.log(f"❌ {char_name_for_log}: ローカルLLM応答形式エラー。Response: {response_data}")
+                    return "ローカルLLM応答形式エラーです。"
+
+        except aiohttp.ClientConnectorError as e:
+            self.log(f"❌ {char_name_for_log}: ローカルLLM接続エラー ({endpoint_url}): {e}")
+            return f"ローカルLLM ({endpoint_url}) に接続できませんでした。"
+        except aiohttp.ClientResponseError as e:
+            self.log(f"❌ {char_name_for_log}: ローカルLLM APIエラー ({endpoint_url}) - Status: {e.status}, Message: {e.message}, Response: {response_text_for_error}")
+            return f"ローカルLLM APIエラー (ステータス: {e.status})。"
+        except asyncio.TimeoutError: # aiohttp.ClientTimeout は asyncio.TimeoutError を発生させる
+            self.log(f"❌ {char_name_for_log}: ローカルLLM応答タイムアウト ({endpoint_url})。")
+            return "ローカルLLM応答タイムアウトしました。"
+        except json.JSONDecodeError as e_json: # json.loads() が失敗した場合
+            self.log(f"❌ {char_name_for_log}: ローカルLLM応答のJSONデコードエラー ({endpoint_url}): {e_json}. Response Text: {response_text_for_error}")
+            return "ローカルLLM応答をJSON解析できませんでした。"
+        except Exception as e_generic:
+            self.log(f"❌ {char_name_for_log}: ローカルLLM呼び出し中に予期せぬエラー ({endpoint_url}): {e_generic}\n{traceback.format_exc()}")
+            return "ローカルLLM呼び出し中に予期せぬエラー。"
     
     async def run_streaming(self, live_id):
         """配信メインループ"""
@@ -7138,31 +7307,32 @@ class AITuberStreamingSystem:
             full_prompt = f"{char_prompt}\n\n{history_str}\n\n視聴者 {author_name}: {comment_text}\n\n親しみやすく自然な返答をしてください。"
             
             # AI応答生成（文章生成のみ）
-            # response = await asyncio.to_thread( # 旧方式
-            #     self.model.generate_content,
-            #     full_prompt,
-            #     generation_config={
-            #         'temperature': 0.9,
-            #         'max_output_tokens': 100,
-            #         'top_p': 0.8
-            #     }
-            # )
-            selected_model = self.config.get_system_setting("text_generation_model", "gemini-1.5-flash") # 設定からモデル名を取得
-            text_response = await asyncio.to_thread(
-                self.client.models.generate_content, # client を使用
-                model=selected_model,  # 設定から読み込んだモデルを使用
-                contents=full_prompt,
-                config=genai.types.GenerateContentConfig( # 引数名を config に修正
-                    temperature=0.9,
-                    max_output_tokens=100, # ストリーミングなので短めに
-                    top_p=0.8
+            selected_model_internal_name = self.config.get_system_setting("text_generation_model", "gemini-1.5-flash")
+            local_llm_url = self.config.get_system_setting("local_llm_endpoint_url", "")
+            char_name = self.config.get_character(self.character_id).get('name', 'AIちゃん') # ログ用
+
+            if selected_model_internal_name == "local_lm_studio":
+                if not local_llm_url:
+                    self.log(f"❌ LocalLLM (Streaming - {char_name}): エンドポイントURLが設定されていません。")
+                    return "ローカルLLMのエンドポイントURLが未設定です。"
+                # _generate_response_local_llm_streaming は await 可能
+                return await self._generate_response_local_llm_streaming(full_prompt, local_llm_url, char_name)
+            else:
+                # Google AI Studio (Gemini) を使用
+                text_response = await asyncio.to_thread(
+                    self.client.models.generate_content, # client を使用
+                    model=selected_model_internal_name,  # 設定から読み込んだモデルを使用
+                    contents=full_prompt,
+                    config=genai.types.GenerateContentConfig(
+                        temperature=0.9,
+                        max_output_tokens=100, # ストリーミングなので短めに
+                        top_p=0.8
+                    )
                 )
-            )
-            
-            if text_response.text is None:
-                self.log("⚠️ AI応答がNoneでした。")
-                return "ごめんなさい、うまく言葉が出てきませんでした。"
-            return text_response.text.strip()
+                if text_response.text is None:
+                    self.log(f"⚠️ AI応答がNoneでした (モデル: {selected_model_internal_name})。")
+                    return "ごめんなさい、うまく言葉が出てきませんでした。"
+                return text_response.text.strip()
             
         except genai.types.generation_types.BlockedPromptException as bpe:
             self.log(f"❌ 応答生成エラー: プロンプトがブロックされました。{bpe}")
@@ -7208,14 +7378,5 @@ class AITuberStreamingSystem:
         """配信停止"""
         self.running = False
 
-def main():
-    """アプリケーションのエントリーポイント"""
-    try:
-        app = AITuberMainGUI()
-        app.run()
-    except Exception as e:
-        print(f"❌ アプリケーション起動エラー: {e}")
-        messagebox.showerror("起動エラー", f"アプリケーションの起動に失敗しました:\n{e}")
-
-if __name__ == "__main__":
-    main()
+# AITuberStreamingSystem クラス定義後の main() と if __name__ == "__main__": は削除。
+# ファイル末尾のものが正。
