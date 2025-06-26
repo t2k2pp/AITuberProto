@@ -2959,7 +2959,7 @@ class AITuberMainGUI:
                     config=genai.types.GenerateContentConfig(temperature=0.8, max_output_tokens=200)
                 )
                 ai_response_text = gemini_response_obj.text.strip() if gemini_response_obj.text else "うーん、ちょっとうまく答えられないみたいです。"
-
+            
             # AI応答の表示と保存
             self.root.after(0, self._add_message_to_chat_display, f"🤖 {ai_char_name}", ai_response_text)
             self._append_to_chat_csv('talk', ai_char_name, ai_response_text)
@@ -5095,8 +5095,8 @@ class AITuberMainGUI:
         selected_model_display_name = self.text_generation_model_var.get()
         if selected_model_display_name == "LM Studio (Local)":
             # ローカルLLMが選択された場合、エンドポイントURL入力フィールドとヒントラベルを表示
-            self.local_llm_endpoint_label.grid()
-            self.local_llm_endpoint_entry.grid()
+            self.local_llm_endpoint_label.grid() 
+            self.local_llm_endpoint_entry.grid() 
             self.local_llm_endpoint_hint_label.grid()
         else:
             # それ以外の場合、エンドポイントURL入力フィールドとヒントラベルを非表示
@@ -5207,12 +5207,12 @@ class AITuberMainGUI:
             if self._get_internal_text_generation_model_name(dn) == internal_model_name_from_config:
                 display_name_to_set = dn
                 break
-
+        
         if display_name_to_set:
             self.text_generation_model_var.set(display_name_to_set)
         elif self._get_display_text_generation_models(): # フォールバックでリストの最初のものを設定
             self.text_generation_model_var.set(self._get_display_text_generation_models()[0])
-
+        
         # ローカルLLMエンドポイントURLの読み込み
         self.local_llm_endpoint_url_var.set(self.config.get_system_setting("local_llm_endpoint_url", ""))
 
@@ -5864,9 +5864,9 @@ class AITuberMainGUI:
             else:
                 # Google AI Studio (Gemini) を使用
                 gemini_response_obj = client.models.generate_content( # text_response から変更
-                    model=selected_model_internal_name,
+                    model=selected_model_internal_name, 
                     contents=full_prompt,
-                    config=genai.types.GenerateContentConfig(
+                    config=genai.types.GenerateContentConfig( 
                         temperature=0.9,
                         max_output_tokens=150
                     )
@@ -6983,12 +6983,12 @@ class AITuberMainGUI:
     async def _generate_response_local_llm(self, prompt_text: str, endpoint_url: str, char_name_for_log: str = "LocalLLM") -> str:
         """ローカルLLM（LM Studio想定）から応答を生成する非同期メソッド"""
         self.log(f"🤖 {char_name_for_log}: ローカルLLM ({endpoint_url}) にリクエスト送信中...")
-
+        
         payload = {
-            "model": "local-model",
+            "model": "local-model", 
             "messages": [{"role": "user", "content": prompt_text}],
             "temperature": 0.7,
-            "max_tokens": 200
+            "max_tokens": 200 
         }
         headers = {"Content-Type": "application/json"}
         # LM StudioはAPIキーを必要としないことが多いので、Authorizationヘッダーは含めない
@@ -6998,9 +6998,9 @@ class AITuberMainGUI:
                 async with session.post(endpoint_url, json=payload, headers=headers, timeout=aiohttp.ClientTimeout(total=120)) as response:
                     response_text_for_error = await response.text() # エラーログ用に先読み
                     response.raise_for_status()  # HTTPエラーがあれば例外を発生
-
+                    
                     response_data = json.loads(response_text_for_error) # 先読みしたテキストをパース
-
+                    
                     if response_data.get("choices") and isinstance(response_data["choices"], list) and len(response_data["choices"]) > 0:
                         message = response_data["choices"][0].get("message")
                         if message and isinstance(message, dict) and "content" in message:
@@ -7126,9 +7126,9 @@ class AITuberStreamingSystem:
     async def _generate_response_local_llm_streaming(self, prompt_text: str, endpoint_url: str, char_name_for_log: str = "LocalLLMStream") -> str:
         """ローカルLLM（LM Studio想定）から応答を生成する非同期メソッド (ストリーミングシステム用)"""
         self.log(f"🤖 {char_name_for_log}: ローカルLLM ({endpoint_url}) にリクエスト送信中...")
-
+        
         payload = {
-            "model": "local-model",
+            "model": "local-model", 
             "messages": [{"role": "user", "content": prompt_text}],
             "temperature": 0.7,
             "max_tokens": 100 # ストリーミング用途なので短め
@@ -7140,16 +7140,16 @@ class AITuberStreamingSystem:
                 async with session.post(endpoint_url, json=payload, headers=headers, timeout=aiohttp.ClientTimeout(total=60)) as response: # タイムアウトを60秒に
                     response_text_for_error = await response.text() # エラーログ用に先読み
                     response.raise_for_status()
-
+                    
                     response_data = json.loads(response_text_for_error)
-
+                    
                     if response_data.get("choices") and isinstance(response_data["choices"], list) and len(response_data["choices"]) > 0:
                         message = response_data["choices"][0].get("message")
                         if message and isinstance(message, dict) and "content" in message:
                             generated_text = message["content"].strip()
                             self.log(f"🤖 {char_name_for_log}: ローカルLLMからの応答取得成功。")
                             return generated_text
-
+                    
                     self.log(f"❌ {char_name_for_log}: ローカルLLM応答形式エラー。Response: {response_data}")
                     return "ローカルLLM応答形式エラーです。"
 
@@ -7323,7 +7323,7 @@ class AITuberStreamingSystem:
                     self.client.models.generate_content, # client を使用
                     model=selected_model_internal_name,  # 設定から読み込んだモデルを使用
                     contents=full_prompt,
-                    config=genai.types.GenerateContentConfig(
+                    config=genai.types.GenerateContentConfig( 
                         temperature=0.9,
                         max_output_tokens=100, # ストリーミングなので短めに
                         top_p=0.8
@@ -7380,3 +7380,15 @@ class AITuberStreamingSystem:
 
 # AITuberStreamingSystem クラス定義後の main() と if __name__ == "__main__": は削除。
 # ファイル末尾のものが正。
+
+def main():
+    """アプリケーションのエントリーポイント"""
+    try:
+        app = AITuberMainGUI()
+        app.run()
+    except Exception as e:
+        print(f"❌ アプリケーション起動エラー: {e}")
+        messagebox.showerror("起動エラー", f"アプリケーションの起動に失敗しました:\n{e}")
+
+if __name__ == "__main__":
+    main()
