@@ -2590,15 +2590,39 @@ class AITuberMainGUI:
 
 
         # 右側中央: 会話内容表示
-        chat_display_container = ttk.LabelFrame(chat_area_frame, text="会話", padding="5")
+        chat_display_container = ttk.LabelFrame(chat_area_frame, text="会話内容 (TreeView形式)", padding="5")
         chat_display_container.pack(fill=tk.BOTH, expand=True, pady=5)
 
-        self.chat_content_text = tk.Text(chat_display_container, wrap=tk.WORD, height=15, state=tk.DISABLED)
-        chat_content_scroll_y = ttk.Scrollbar(chat_display_container, orient=tk.VERTICAL, command=self.chat_content_text.yview)
-        self.chat_content_text.configure(yscrollcommand=chat_content_scroll_y.set)
+        self.chat_content_tree = ttk.Treeview(chat_display_container, columns=('line', 'talker', 'words'), show='headings')
+        self.chat_content_tree.heading('line', text='行')
+        self.chat_content_tree.heading('talker', text='話者')
+        self.chat_content_tree.heading('words', text='発言内容')
+
+        self.chat_content_tree.column('line', width=50, anchor=tk.CENTER)
+        self.chat_content_tree.column('talker', width=120)
+        self.chat_content_tree.column('words', width=400) # 可変幅にするか検討
+
+        chat_content_scroll_y = ttk.Scrollbar(chat_display_container, orient=tk.VERTICAL, command=self.chat_content_tree.yview)
+        chat_content_scroll_x = ttk.Scrollbar(chat_display_container, orient=tk.HORIZONTAL, command=self.chat_content_tree.xview)
+        self.chat_content_tree.configure(yscrollcommand=chat_content_scroll_y.set, xscrollcommand=chat_content_scroll_x.set)
+
         chat_content_scroll_y.pack(side=tk.RIGHT, fill=tk.Y)
-        self.chat_content_text.pack(fill=tk.BOTH, expand=True)
-        # TODO: 会話内容の右クリックメニューで削除機能を追加
+        chat_content_scroll_x.pack(side=tk.BOTTOM, fill=tk.X) # Xスクロールバーも追加
+        self.chat_content_tree.pack(fill=tk.BOTH, expand=True)
+
+        # ウィンドウリサイズ時に 'words' 列の幅を調整する
+        def on_chat_content_tree_configure(event):
+            new_width = event.width - self.chat_content_tree.column('line')['width'] - self.chat_content_tree.column('talker')['width'] - 20 # スクロールバーやパディング分を考慮
+            if new_width > 100: # 最小幅制限
+                self.chat_content_tree.column('words', width=new_width)
+        self.chat_content_tree.bind('<Configure>', on_chat_content_tree_configure)
+
+
+        # 会話内容TreeViewの右クリックメニュー設定
+        self.chat_content_context_menu = tk.Menu(self.chat_content_tree, tearoff=0)
+        self.chat_content_context_menu.add_command(label="選択行を削除", command=self.delete_selected_chat_message)
+        self.chat_content_tree.bind("<Button-3>", self.show_chat_content_context_menu)
+
 
         # 右側下部: チャット入力
         chat_input_frame = ttk.Frame(chat_area_frame)
@@ -2640,10 +2664,8 @@ class AITuberMainGUI:
 
             self.log(f"AIチャット: 新しいチャットセッションファイルを作成しました: {self.current_ai_chat_file_path}")
 
-            # 会話内容表示エリアをクリア
-            self.chat_content_text.config(state=tk.NORMAL)
-            self.chat_content_text.delete(1.0, tk.END)
-            self.chat_content_text.config(state=tk.DISABLED)
+            # 会話内容表示エリア (TreeView) をクリア
+            self.chat_content_tree.delete(*self.chat_content_tree.get_children())
 
             # 履歴リストを更新して新しいファイルを表示
             self.load_chat_history_list()
@@ -2678,9 +2700,188 @@ class AITuberMainGUI:
 
         # TODO: 実際のメッセージ送信、AI応答取得、表示、保存処理をここに実装
         self.log(f"AIチャット: メッセージ送信試行: '{user_input}' (ファイル: {self.current_ai_chat_file_path})")
+        user_input = self.chat_message_entry.get().strip()
+        if not user_input:
+            return
+
+        if not self.current_ai_chat_file_path or not os.path.exists(self.current_ai_chat_file_path):
+            if messagebox.askyesno("チャット未開始", "アクティブなチャットセッションがありません。\n新しいチャットを開始しますか？"):
+                self.start_new_ai_chat_session()
+                if not self.current_ai_chat_file_path:
+                    return
+            else:
+                return
+
+        ai_char_name = self.ai_char_var.get()
+        user_char_name = self.user_char_var.get()
+
+        if not ai_char_name or not user_char_name:
+            messagebox.showwarning("キャラクター未選択", "AIキャラクターとユーザーキャラクターを選択してください。")
+            return
+
+        # ユーザーメッセージの表示と保存
+        self._add_message_to_chat_display(f"👤 {user_char_name}", user_input, is_user_message=True)
+        self._append_to_chat_csv('talk', user_char_name, user_input)
+
         self.chat_message_entry.delete(0, tk.END)
 
-        # (この後のステップで詳細を実装)
+        # ユーザー発話の音声再生 (スレッドで実行)
+        if self.play_user_speech_var.get():
+            threading.Thread(target=self._play_character_speech, args=(user_char_name, user_input), daemon=True).start()
+
+        # AI応答の生成と表示 (スレッドで実行)
+        threading.Thread(target=self._generate_and_display_ai_response_for_chat, args=(user_input, ai_char_name, user_char_name), daemon=True).start()
+
+    def _add_message_to_chat_display(self, talker_display_name, message_content, is_user_message=False):
+        """チャット表示TreeViewにメッセージを追加する"""
+        # talker_display_name は "👤 ユーザーキャラ名" や "🤖 AIキャラ名" のような形式
+        # message_content は実際のメッセージ
+
+        # TreeViewの現在の行数を取得し、新しい行番号を決定
+        line_num = len(self.chat_content_tree.get_children()) + 1
+
+        # TreeViewに挿入する話者名 (シンボルなしの純粋なキャラクター名)
+        # プレフィックスを除去する処理を追加
+        actual_talker_name = talker_display_name
+        if talker_display_name.startswith("👤 ") or talker_display_name.startswith("🤖 "):
+            actual_talker_name = talker_display_name[2:]
+
+        item_id = self.chat_content_tree.insert('', 'end', values=(line_num, actual_talker_name, message_content), iid=str(line_num))
+        self.chat_content_tree.see(item_id) # 追加された行が見えるようにスクロール
+
+    def _append_to_chat_csv(self, action, talker, words):
+        """現在のAIチャットCSVファイルに情報を追記する"""
+        if not self.current_ai_chat_file_path or not os.path.exists(self.current_ai_chat_file_path):
+            self.log(f"AIチャット: CSVファイルへの追記失敗 - current_ai_chat_file_path が無効: {self.current_ai_chat_file_path}")
+            return
+        try:
+            with open(self.current_ai_chat_file_path, 'a', newline='', encoding='utf-8') as csvfile:
+                writer = csv.writer(csvfile)
+                writer.writerow([action, talker, words])
+        except Exception as e:
+            self.log(f"AIチャット: CSVファイルへの書き込みエラー ({self.current_ai_chat_file_path}): {e}")
+
+    def _get_character_id_by_name(self, char_name):
+        """キャラクター名からキャラクターIDを取得する"""
+        all_chars = self.character_manager.get_all_characters()
+        for char_id, data in all_chars.items():
+            if data.get('name') == char_name:
+                return char_id
+        return None
+
+    def _play_character_speech(self, char_name, text):
+        """指定されたキャラクターの音声設定でテキストを再生する"""
+        char_id = self._get_character_id_by_name(char_name)
+        if not char_id:
+            self.log(f"AIチャット: 音声再生エラー - キャラクター '{char_name}' が見つかりません。")
+            return
+
+        char_data = self.config.get_character(char_id)
+        if not char_data:
+            self.log(f"AIチャット: 音声再生エラー - キャラクター '{char_name}' (ID: {char_id}) のデータが見つかりません。")
+            return
+
+        voice_settings = char_data.get('voice_settings', {})
+        engine = voice_settings.get('engine', self.config.get_system_setting("voice_engine", "google_ai_studio_new"))
+        model = voice_settings.get('model', 'puck')
+        speed = voice_settings.get('speed', 1.0)
+        google_api_key = self.config.get_system_setting("google_ai_api_key")
+
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        try:
+            audio_files = loop.run_until_complete(
+                self.voice_manager.synthesize_with_fallback(
+                    text, model, speed, preferred_engine=engine, api_key=google_api_key
+                )
+            )
+            if audio_files:
+                loop.run_until_complete(self.audio_player.play_audio_files(audio_files))
+            else:
+                self.log(f"AIチャット: 音声合成失敗 ({char_name}: {text[:20]}...)")
+        except Exception as e:
+            self.log(f"AIチャット: 音声再生処理中にエラー ({char_name}): {e}")
+        finally:
+            loop.close()
+
+    def _generate_and_display_ai_response_for_chat(self, user_input, ai_char_name, user_char_name):
+        """AIの応答を生成し、表示・保存・再生する"""
+        ai_char_id = self._get_character_id_by_name(ai_char_name)
+        if not ai_char_id:
+            self.log(f"AIチャット: AI応答生成エラー - AIキャラクター '{ai_char_name}' が見つかりません。")
+            self.root.after(0, self._add_message_to_chat_display, f"システムエラー", f"AIキャラクター '{ai_char_name}' の設定が見つかりません。")
+            return
+
+        ai_char_data = self.config.get_character(ai_char_id)
+        if not ai_char_data:
+            self.log(f"AIチャット: AI応答生成エラー - AIキャラクター '{ai_char_name}' (ID: {ai_char_id}) のデータが見つかりません。")
+            self.root.after(0, self._add_message_to_chat_display, f"システムエラー", f"AIキャラクター '{ai_char_name}' のデータ読み込みに失敗しました。")
+            return
+
+        # AI応答生成
+        try:
+            google_api_key = self.config.get_system_setting("google_ai_api_key")
+            if not google_api_key:
+                self.log("AIチャット: Google AI APIキーが設定されていません。")
+                self.root.after(0, self._add_message_to_chat_display, "システムエラー", "Google AI APIキーが未設定です。")
+                return
+
+            client = genai.Client(api_key=google_api_key)
+            ai_prompt = self.character_manager.get_character_prompt(ai_char_id)
+
+            # CSVから会話履歴を読み込む
+            chat_history_for_prompt = []
+            if self.current_ai_chat_file_path and os.path.exists(self.current_ai_chat_file_path):
+                with open(self.current_ai_chat_file_path, 'r', encoding='utf-8') as csvfile:
+                    reader = csv.DictReader(csvfile)
+                    for row in reader:
+                        if row.get('action') == 'talk':
+                            speaker = row.get('talker')
+                            message_text = row.get('words')
+                            if speaker == ai_char_name:
+                                chat_history_for_prompt.append(f"あなた: {message_text}")
+                            elif speaker == user_char_name: # ユーザーの発言も履歴に含める
+                                chat_history_for_prompt.append(f"{user_char_name}: {message_text}")
+                            # 他のキャラクターの発言は履歴に含めないか、別の扱いをする
+
+            # 会話履歴をプロンプトに結合 (直近N件など、制限も検討)
+            # ここではシンプルに全履歴を結合するが、トークン数に注意
+            history_str = "\n".join(chat_history_for_prompt[-20:]) # 直近20件程度に制限
+
+            full_prompt = f"{ai_prompt}\n\n以下はこれまでの会話です:\n{history_str}\n\n{user_char_name}: {user_input}\n\nあなた ({ai_char_name}):"
+
+            selected_model = self.config.get_system_setting("text_generation_model", "gemini-1.5-flash")
+            response = client.models.generate_content(
+                model=selected_model,
+                contents=full_prompt,
+                config=genai.types.GenerateContentConfig(temperature=0.8, max_output_tokens=200)
+            )
+
+            ai_response_text = response.text.strip() if response.text else "うーん、ちょっとうまく答えられないみたいです。"
+
+            # AI応答の表示と保存
+            self.root.after(0, self._add_message_to_chat_display, f"🤖 {ai_char_name}", ai_response_text)
+            self._append_to_chat_csv('talk', ai_char_name, ai_response_text)
+
+            # AI応答の音声再生
+            self._play_character_speech(ai_char_name, ai_response_text)
+
+        except genai.types.generation_types.BlockedPromptException as bpe:
+            error_msg = "その内容についてはお答えできません。"
+            self.log(f"AIチャット: AI応答生成エラー - プロンプトブロック: {bpe}")
+            self.root.after(0, self._add_message_to_chat_display, f"🤖 {ai_char_name}", error_msg)
+            self._append_to_chat_csv('talk', ai_char_name, error_msg) # エラーメッセージも保存
+        except requests.exceptions.HTTPError as http_err:
+            error_msg = "APIの利用上限か、サーバーとの通信に問題があったようです。"
+            self.log(f"AIチャット: AI応答生成エラー - HTTPエラー {http_err.response.status_code}: {http_err}")
+            self.root.after(0, self._add_message_to_chat_display, f"🤖 {ai_char_name}", error_msg)
+            self._append_to_chat_csv('talk', ai_char_name, error_msg)
+        except Exception as e:
+            error_msg = "ごめんなさい、ちょっと調子が悪いみたいです。"
+            self.log(f"AIチャット: AI応答生成中に予期せぬエラー: {e}\n{traceback.format_exc()}")
+            self.root.after(0, self._add_message_to_chat_display, f"🤖 {ai_char_name}", error_msg)
+            self._append_to_chat_csv('talk', ai_char_name, error_msg)
+
 
     def on_chat_history_selected(self, event=None):
         """チャット履歴一覧で項目が選択されたときの処理"""
@@ -2688,9 +2889,7 @@ class AITuberMainGUI:
         if not selected_items:
             self.current_ai_chat_file_path = None
             # 会話内容表示エリアをクリアするなどの処理もここに追加可能
-            self.chat_content_text.config(state=tk.NORMAL)
-            self.chat_content_text.delete(1.0, tk.END)
-            self.chat_content_text.config(state=tk.DISABLED)
+            self.chat_content_tree.delete(*self.chat_content_tree.get_children()) # TreeViewをクリア
             return
 
         selected_item_id = selected_items[0] # 選択されたアイテムのID (iidとしてファイルパス文字列を指定済み)
@@ -2703,44 +2902,130 @@ class AITuberMainGUI:
                 self.current_ai_chat_file_path = selected_file_path
                 self.log(f"AIチャット: 履歴ファイル '{selected_file_path.name}' を選択しました。")
 
-                # CSVファイルの内容を読み込んで会話内容表示エリアに表示
-                self.chat_content_text.config(state=tk.NORMAL)
-                self.chat_content_text.delete(1.0, tk.END)
+                # CSVファイルの内容を読み込んで会話内容表示エリア(TreeView)に表示
+                self.chat_content_tree.delete(*self.chat_content_tree.get_children()) # TreeViewをクリア
 
                 with open(selected_file_path, 'r', encoding='utf-8') as csvfile:
                     reader = csv.DictReader(csvfile)
-                    # ヘッダーが期待通りか確認（オプション）
                     if reader.fieldnames != ['action', 'talker', 'words']:
                         self.log(f"AIチャット: 履歴ファイル '{selected_file_path.name}' のヘッダーが不正です。")
-                        self.chat_content_text.insert(tk.END, f"エラー: ファイル '{selected_file_path.name}' の形式が正しくありません。\n")
+                        # エラーメッセージをTreeViewに表示する代わりに、messageboxで表示
+                        messagebox.showerror("ファイル形式エラー", f"ファイル '{selected_file_path.name}' の形式が正しくありません。\n期待されるヘッダー: action,talker,words")
                         self.current_ai_chat_file_path = None # エラーの場合はアクティブファイルを解除
                     else:
-                        for row_num, row in enumerate(reader):
+                        line_num = 1
+                        for row in reader:
                             action = row.get('action', '')
                             talker = row.get('talker', '不明')
                             words = row.get('words', '')
 
-                            # actionが 'talk' のものだけを表示するなどのフィルタリングも可能
-                            # ここではシンプルに talker: words の形式で表示
-                            display_line = f"[{row_num+1}] {talker}: {words}\n"
-                            self.chat_content_text.insert(tk.END, display_line)
-
-                self.chat_content_text.see(tk.END) # 最下部へスクロール
-                self.chat_content_text.config(state=tk.DISABLED)
+                            if action == 'talk': # 'talk' アクションのみ表示
+                                self.chat_content_tree.insert('', 'end', values=(line_num, talker, words), iid=str(line_num))
+                                line_num += 1
+                if self.chat_content_tree.get_children(): # アイテムがあれば最終行へスクロール
+                    self.chat_content_tree.see(self.chat_content_tree.get_children()[-1])
             else:
                 self.log(f"AIチャット: 選択された履歴ファイル '{filepath_str}' が存在しません。")
                 messagebox.showwarning("ファイルエラー", f"選択された履歴ファイル '{selected_file_path.name}' が見つかりません。")
                 self.current_ai_chat_file_path = None
+                self.chat_content_tree.delete(*self.chat_content_tree.get_children()) # TreeViewをクリア
                 # 履歴リストを再読み込みして不整合を解消
                 self.load_chat_history_list()
         except Exception as e:
             self.log(f"AIチャット: 履歴選択処理中にエラー: {e}")
             messagebox.showerror("履歴読み込みエラー", f"チャット履歴の読み込み中にエラーが発生しました: {e}")
             self.current_ai_chat_file_path = None
-            self.chat_content_text.config(state=tk.NORMAL)
-            self.chat_content_text.delete(1.0, tk.END)
-            self.chat_content_text.insert(tk.END, "履歴の読み込みに失敗しました。\n")
-            self.chat_content_text.config(state=tk.DISABLED)
+            self.chat_content_tree.delete(*self.chat_content_tree.get_children()) # TreeViewをクリア
+
+    def show_chat_content_context_menu(self, event):
+        """AIチャットの会話内容TreeViewで右クリックメニューを表示する"""
+        try:
+            # クリックされたアイテムを選択状態にする
+            # (メニュー表示前にアイテムが選択されていなくても、クリック位置のアイテムを選択する)
+            item_id = self.chat_content_tree.identify_row(event.y)
+            if item_id:
+                self.chat_content_tree.selection_set(item_id)
+                self.chat_content_context_menu.post(event.x_root, event.y_root)
+        except Exception as e:
+            self.log(f"AIチャット: 右クリックメニュー表示エラー: {e}")
+
+    def delete_selected_chat_message(self):
+        """AIチャットの会話内容表示TreeViewで選択されている行を削除する"""
+        selected_items = self.chat_content_tree.selection()
+        if not selected_items:
+            messagebox.showwarning("削除エラー", "削除する行が選択されていません。")
+            return
+
+        selected_item_id = selected_items[0] # 最初の選択アイテムのiid (行番号文字列)
+        try:
+            selected_values = self.chat_content_tree.item(selected_item_id, 'values')
+            if not selected_values or len(selected_values) < 3:
+                messagebox.showerror("削除エラー", "選択された行の情報を取得できませんでした。")
+                return
+
+            line_num_in_tree = int(selected_values[0]) # TreeView上の行番号
+            talker_name = selected_values[1]
+            message_text_preview = selected_values[2][:30] + "..." if len(selected_values[2]) > 30 else selected_values[2]
+
+            if not messagebox.askyesno("削除確認", f"行 {line_num_in_tree} ({talker_name}: \"{message_text_preview}\") を削除しますか？\nこの操作は元に戻せません。"):
+                return
+
+            if not self.current_ai_chat_file_path or not os.path.exists(self.current_ai_chat_file_path):
+                messagebox.showerror("ファイルエラー", "現在アクティブなチャット履歴ファイルが見つかりません。")
+                return
+
+            # CSVファイルから該当行を削除
+            temp_lines = []
+            deleted_from_csv = False
+            # CSVファイル内の実際の行インデックス (0始まり) を特定する必要がある
+            # TreeView上の行番号は1始まりで、'talk'アクションのみをカウントしている
+
+            current_csv_line_index = 0 # CSVファイル内の物理的な行カウンター (ヘッダー除く)
+            talk_action_counter = 0    # 'talk' アクションのカウンター (TreeViewの行番号に対応)
+
+            with open(self.current_ai_chat_file_path, 'r', newline='', encoding='utf-8') as csvfile:
+                reader = csv.reader(csvfile)
+                header = next(reader) # ヘッダーを読み飛ばす
+                temp_lines.append(header)
+                for row in reader:
+                    current_csv_line_index +=1
+                    is_target_row = False
+                    if row and len(row) >=1 and row[0] == 'talk': # action列が'talk'か
+                        talk_action_counter += 1
+                        if talk_action_counter == line_num_in_tree: # TreeView上の行番号と一致
+                           is_target_row = True
+
+                    if not is_target_row:
+                        temp_lines.append(row)
+                    else:
+                        deleted_from_csv = True
+                        self.log(f"AIチャット: CSVから行削除準備完了 (TreeView行: {line_num_in_tree}, CSV物理行(推定): {current_csv_line_index+1})")
+
+
+            if deleted_from_csv:
+                with open(self.current_ai_chat_file_path, 'w', newline='', encoding='utf-8') as csvfile:
+                    writer = csv.writer(csvfile)
+                    writer.writerows(temp_lines)
+                self.log(f"AIチャット: CSVファイルから行を削除し、上書き保存しました: {self.current_ai_chat_file_path}")
+
+                # TreeViewから該当行を削除
+                self.chat_content_tree.delete(selected_item_id)
+                self.log(f"AIチャット: TreeViewから行 {line_num_in_tree} を削除しました。")
+
+                # TreeViewの行番号を再採番して表示を更新
+                # (on_chat_history_selectedを再実行するのが簡単)
+                self.on_chat_history_selected() # これで再描画と行番号の再採番が行われる
+                messagebox.showinfo("削除完了", f"選択された会話行を削除しました。")
+
+            else: # CSVから対応する行が見つからなかった場合 (通常は発生しないはず)
+                messagebox.showerror("削除エラー", "CSVファイル内で対応する行が見つかりませんでした。")
+                self.log(f"AIチャット: 削除対象の行がCSV内で見つかりませんでした (TreeView行: {line_num_in_tree})。")
+
+        except ValueError:
+            messagebox.showerror("削除エラー", "選択された行の行番号が無効です。")
+        except Exception as e:
+            self.log(f"AIチャット: 会話行の削除中にエラー: {e}\n{traceback.format_exc()}")
+            messagebox.showerror("削除エラー", f"会話行の削除中に予期せぬエラーが発生しました: {e}")
 
 
     def load_chat_history_list(self):
