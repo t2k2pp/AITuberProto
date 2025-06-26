@@ -2460,6 +2460,17 @@ class AITuberMainGUI:
         self.is_playing_script = False  # 連続再生中フラグ
         self.stop_requested = False     # 連続再生停止リクエストフラグ
 
+        # AIチャット履歴用フォルダのパス設定と作成
+        self.ai_chat_history_folder = Path(self.config.config_file).parent / "ai_chat_history"
+        try:
+            self.ai_chat_history_folder.mkdir(parents=True, exist_ok=True)
+            self.log(f"AIチャット履歴フォルダを作成/確認しました: {self.ai_chat_history_folder}")
+        except Exception as e:
+            self.log(f"AIチャット履歴フォルダの作成に失敗しました: {e}")
+            # エラー発生時も処理を継続するが、履歴機能は利用できない可能性あり
+            messagebox.showerror("フォルダ作成エラー", f"AIチャット履歴フォルダの作成に失敗しました: {e}\nチャット履歴機能が正しく動作しない可能性があります。")
+
+
         self.available_gemini_models = [
             "gemini-1.5-flash",
             "gemini-1.5-flash-latest",
@@ -2520,6 +2531,7 @@ class AITuberMainGUI:
         # タブ作成（完全版）
         self.create_main_tab()
         self.create_character_tab()
+        self.create_ai_chat_tab() # AIチャットタブ作成メソッド呼び出しを追加
         self.create_debug_tab()
         self.create_settings_tab()
         self.create_ai_theater_tab() # AI劇場タブ作成メソッド呼び出しを追加
@@ -2527,6 +2539,273 @@ class AITuberMainGUI:
         
         # ステータスバー
         self.create_status_bar()
+
+    def create_ai_chat_tab(self):
+        """AIチャットタブを作成"""
+        ai_chat_frame = ttk.Frame(self.notebook)
+        self.notebook.add(ai_chat_frame, text="💬 AIチャット")
+
+        # メインフレームを左右に分割
+        main_paned_window = ttk.PanedWindow(ai_chat_frame, orient=tk.HORIZONTAL)
+        main_paned_window.pack(fill=tk.BOTH, expand=True, padx=10, pady=5)
+
+        # 左側: 会話履歴一覧
+        history_list_frame = ttk.LabelFrame(main_paned_window, text="会話履歴", padding="5")
+        main_paned_window.add(history_list_frame, weight=1)
+
+        self.chat_history_tree = ttk.Treeview(history_list_frame, columns=('filename', 'last_updated'), show='headings')
+        self.chat_history_tree.heading('filename', text='会話ログ')
+        self.chat_history_tree.heading('last_updated', text='最終更新日時')
+        self.chat_history_tree.column('filename', width=150)
+        self.chat_history_tree.column('last_updated', width=150)
+        self.chat_history_tree.bind('<<TreeviewSelect>>', self.on_chat_history_selected)
+        chat_history_scroll_y = ttk.Scrollbar(history_list_frame, orient=tk.VERTICAL, command=self.chat_history_tree.yview)
+        self.chat_history_tree.configure(yscrollcommand=chat_history_scroll_y.set)
+        chat_history_scroll_y.pack(side=tk.RIGHT, fill=tk.Y)
+        self.chat_history_tree.pack(fill=tk.BOTH, expand=True)
+
+        # 右側: 会話エリア
+        chat_area_frame = ttk.Frame(main_paned_window)
+        main_paned_window.add(chat_area_frame, weight=3)
+
+        # 右側上部: キャラクター選択と設定
+        chat_config_frame = ttk.Frame(chat_area_frame)
+        chat_config_frame.pack(fill=tk.X, pady=5)
+
+        ttk.Label(chat_config_frame, text="AIキャラ:").grid(row=0, column=0, padx=2, pady=2, sticky=tk.W)
+        self.ai_char_var = tk.StringVar()
+        self.ai_char_combo = ttk.Combobox(chat_config_frame, textvariable=self.ai_char_var, state="readonly", width=15)
+        self.ai_char_combo.grid(row=0, column=1, padx=2, pady=2, sticky=tk.W)
+        # TODO: self.ai_char_combo.bind('<<ComboboxSelected>>', self.on_ai_character_changed_for_chat)
+
+        ttk.Label(chat_config_frame, text="ユーザーキャラ:").grid(row=0, column=2, padx=2, pady=2, sticky=tk.W)
+        self.user_char_var = tk.StringVar()
+        self.user_char_combo = ttk.Combobox(chat_config_frame, textvariable=self.user_char_var, state="readonly", width=15)
+        self.user_char_combo.grid(row=0, column=3, padx=2, pady=2, sticky=tk.W)
+        # TODO: self.user_char_combo.bind('<<ComboboxSelected>>', self.on_user_character_changed_for_chat)
+
+        self.play_user_speech_var = tk.BooleanVar(value=True)
+        ttk.Checkbutton(chat_config_frame, text="ユーザー発話再生", variable=self.play_user_speech_var).grid(row=0, column=4, padx=5, pady=2, sticky=tk.W)
+
+
+        # 右側中央: 会話内容表示
+        chat_display_container = ttk.LabelFrame(chat_area_frame, text="会話", padding="5")
+        chat_display_container.pack(fill=tk.BOTH, expand=True, pady=5)
+
+        self.chat_content_text = tk.Text(chat_display_container, wrap=tk.WORD, height=15, state=tk.DISABLED)
+        chat_content_scroll_y = ttk.Scrollbar(chat_display_container, orient=tk.VERTICAL, command=self.chat_content_text.yview)
+        self.chat_content_text.configure(yscrollcommand=chat_content_scroll_y.set)
+        chat_content_scroll_y.pack(side=tk.RIGHT, fill=tk.Y)
+        self.chat_content_text.pack(fill=tk.BOTH, expand=True)
+        # TODO: 会話内容の右クリックメニューで削除機能を追加
+
+        # 右側下部: チャット入力
+        chat_input_frame = ttk.Frame(chat_area_frame)
+        chat_input_frame.pack(fill=tk.X, pady=5)
+
+        self.chat_message_entry = ttk.Entry(chat_input_frame, width=60)
+        self.chat_message_entry.bind("<Return>", self.send_ai_chat_message)
+        self.chat_message_entry.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(0, 5))
+
+        send_button = ttk.Button(chat_input_frame, text="送信", command=self.send_ai_chat_message)
+        send_button.pack(side=tk.LEFT)
+
+        # 新しいチャットセッションを開始するボタン
+        new_chat_button = ttk.Button(history_list_frame, text="新しいチャットを開始", command=self.start_new_ai_chat_session)
+        new_chat_button.pack(side=tk.BOTTOM, fill=tk.X, pady=5)
+
+
+        # TODO: キャラクタードロップダウンの初期化 (populate_ai_theater_talker_dropdown のようなメソッドを参考に)
+        self.populate_chat_character_dropdowns()
+        self.load_chat_history_list() # 会話履歴一覧を読み込み
+        self.current_ai_chat_file_path = None # 現在アクティブなチャットファイル
+
+    def start_new_ai_chat_session(self):
+        """新しいAIチャットセッションを開始し、対応するCSVファイルを作成する"""
+        if not hasattr(self, 'ai_chat_history_folder') or not self.ai_chat_history_folder.exists():
+            messagebox.showerror("エラー", "AIチャット履歴フォルダが見つかりません。")
+            self.log("AIチャット: 新規セッション開始不可 - 履歴フォルダなし。")
+            return
+
+        # 新しいチャットファイル名を生成 (例: chat_YYYYMMDD_HHMMSS.csv)
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        new_chat_filename = f"chat_{timestamp}.csv"
+        self.current_ai_chat_file_path = self.ai_chat_history_folder / new_chat_filename
+
+        try:
+            with open(self.current_ai_chat_file_path, 'w', newline='', encoding='utf-8') as csvfile:
+                writer = csv.writer(csvfile)
+                writer.writerow(['action', 'talker', 'words']) # ヘッダー
+
+            self.log(f"AIチャット: 新しいチャットセッションファイルを作成しました: {self.current_ai_chat_file_path}")
+
+            # 会話内容表示エリアをクリア
+            self.chat_content_text.config(state=tk.NORMAL)
+            self.chat_content_text.delete(1.0, tk.END)
+            self.chat_content_text.config(state=tk.DISABLED)
+
+            # 履歴リストを更新して新しいファイルを表示
+            self.load_chat_history_list()
+            # 新しく作成されたファイルを選択状態にする (iid はファイルパスの文字列)
+            if self.chat_history_tree.exists(str(self.current_ai_chat_file_path)):
+                self.chat_history_tree.selection_set(str(self.current_ai_chat_file_path))
+                self.chat_history_tree.focus(str(self.current_ai_chat_file_path))
+                self.chat_history_tree.see(str(self.current_ai_chat_file_path))
+
+            messagebox.showinfo("新しいチャット", f"新しいチャットセッション '{new_chat_filename}' を開始しました。")
+            self.chat_message_entry.focus_set() # 入力欄にフォーカス
+
+        except Exception as e:
+            self.log(f"AIチャット: 新しいチャットセッションファイルの作成に失敗: {e}")
+            messagebox.showerror("作成エラー", f"新しいチャットセッションの作成に失敗しました: {e}")
+            self.current_ai_chat_file_path = None
+
+    def send_ai_chat_message(self, event=None):
+        """AIチャットメッセージを送信する処理 (プレースホルダー)"""
+        user_input = self.chat_message_entry.get().strip()
+        if not user_input:
+            return
+
+        if not self.current_ai_chat_file_path or not os.path.exists(self.current_ai_chat_file_path):
+            # アクティブなチャットセッションがない場合は、新しいセッションを開始するか尋ねる
+            if messagebox.askyesno("チャット未開始", "アクティブなチャットセッションがありません。\n新しいチャットを開始しますか？"):
+                self.start_new_ai_chat_session()
+                if not self.current_ai_chat_file_path: # 新規作成に失敗した場合
+                    return
+            else:
+                return
+
+        # TODO: 実際のメッセージ送信、AI応答取得、表示、保存処理をここに実装
+        self.log(f"AIチャット: メッセージ送信試行: '{user_input}' (ファイル: {self.current_ai_chat_file_path})")
+        self.chat_message_entry.delete(0, tk.END)
+
+        # (この後のステップで詳細を実装)
+
+    def on_chat_history_selected(self, event=None):
+        """チャット履歴一覧で項目が選択されたときの処理"""
+        selected_items = self.chat_history_tree.selection()
+        if not selected_items:
+            self.current_ai_chat_file_path = None
+            # 会話内容表示エリアをクリアするなどの処理もここに追加可能
+            self.chat_content_text.config(state=tk.NORMAL)
+            self.chat_content_text.delete(1.0, tk.END)
+            self.chat_content_text.config(state=tk.DISABLED)
+            return
+
+        selected_item_id = selected_items[0] # 選択されたアイテムのID (iidとしてファイルパス文字列を指定済み)
+
+        try:
+            filepath_str = selected_item_id # iidはファイルパスの文字列
+            selected_file_path = Path(filepath_str)
+
+            if selected_file_path.exists() and selected_file_path.is_file():
+                self.current_ai_chat_file_path = selected_file_path
+                self.log(f"AIチャット: 履歴ファイル '{selected_file_path.name}' を選択しました。")
+
+                # CSVファイルの内容を読み込んで会話内容表示エリアに表示
+                self.chat_content_text.config(state=tk.NORMAL)
+                self.chat_content_text.delete(1.0, tk.END)
+
+                with open(selected_file_path, 'r', encoding='utf-8') as csvfile:
+                    reader = csv.DictReader(csvfile)
+                    # ヘッダーが期待通りか確認（オプション）
+                    if reader.fieldnames != ['action', 'talker', 'words']:
+                        self.log(f"AIチャット: 履歴ファイル '{selected_file_path.name}' のヘッダーが不正です。")
+                        self.chat_content_text.insert(tk.END, f"エラー: ファイル '{selected_file_path.name}' の形式が正しくありません。\n")
+                        self.current_ai_chat_file_path = None # エラーの場合はアクティブファイルを解除
+                    else:
+                        for row_num, row in enumerate(reader):
+                            action = row.get('action', '')
+                            talker = row.get('talker', '不明')
+                            words = row.get('words', '')
+
+                            # actionが 'talk' のものだけを表示するなどのフィルタリングも可能
+                            # ここではシンプルに talker: words の形式で表示
+                            display_line = f"[{row_num+1}] {talker}: {words}\n"
+                            self.chat_content_text.insert(tk.END, display_line)
+
+                self.chat_content_text.see(tk.END) # 最下部へスクロール
+                self.chat_content_text.config(state=tk.DISABLED)
+            else:
+                self.log(f"AIチャット: 選択された履歴ファイル '{filepath_str}' が存在しません。")
+                messagebox.showwarning("ファイルエラー", f"選択された履歴ファイル '{selected_file_path.name}' が見つかりません。")
+                self.current_ai_chat_file_path = None
+                # 履歴リストを再読み込みして不整合を解消
+                self.load_chat_history_list()
+        except Exception as e:
+            self.log(f"AIチャット: 履歴選択処理中にエラー: {e}")
+            messagebox.showerror("履歴読み込みエラー", f"チャット履歴の読み込み中にエラーが発生しました: {e}")
+            self.current_ai_chat_file_path = None
+            self.chat_content_text.config(state=tk.NORMAL)
+            self.chat_content_text.delete(1.0, tk.END)
+            self.chat_content_text.insert(tk.END, "履歴の読み込みに失敗しました。\n")
+            self.chat_content_text.config(state=tk.DISABLED)
+
+
+    def load_chat_history_list(self):
+        """AIチャットの会話履歴一覧をai_chat_historyフォルダから読み込んでTreeViewに表示する"""
+        self.chat_history_tree.delete(*self.chat_history_tree.get_children()) # 古い内容をクリア
+        if not hasattr(self, 'ai_chat_history_folder') or not self.ai_chat_history_folder.exists():
+            self.log("AIチャット: 履歴フォルダが見つからないため、履歴一覧を読み込めません。")
+            return
+
+        history_files = []
+        for item in self.ai_chat_history_folder.iterdir():
+            if item.is_file() and item.suffix.lower() == '.csv':
+                try:
+                    # ファイル名から日付情報を取得する試み (ファイル名形式に依存)
+                    # 例: chat_log_20231027_103000.csv
+                    # より堅牢なのはファイルの最終更新日時
+                    last_modified_timestamp = item.stat().st_mtime
+                    last_modified_dt = datetime.fromtimestamp(last_modified_timestamp)
+                    history_files.append({
+                        "filename": item.name,
+                        "path": item,
+                        "last_updated_dt": last_modified_dt,
+                        "last_updated_str": last_modified_dt.strftime('%Y-%m-%d %H:%M:%S')
+                    })
+                except Exception as e:
+                    self.log(f"AIチャット: 履歴ファイル '{item.name}' の情報取得中にエラー: {e}")
+
+        # 最終更新日時の降順（新しいものが上）でソート
+        history_files.sort(key=lambda x: x["last_updated_dt"], reverse=True)
+
+        for entry in history_files:
+            self.chat_history_tree.insert('', 'end', values=(entry["filename"], entry["last_updated_str"]), iid=str(entry["path"]))
+
+        self.log(f"AIチャット: 会話履歴一覧を更新しました ({len(history_files)}件)。")
+
+
+    def populate_chat_character_dropdowns(self):
+        """AIチャットタブのキャラクター選択プルダウンを更新する"""
+        all_chars = self.character_manager.get_all_characters()
+        char_names = [data.get('name', 'Unknown') for data in all_chars.values()]
+
+        # 「ナレーター」や空欄は不要なので、キャラクター名のみ
+        # TODO: AI用とユーザー用で別々のリストを持つか、同じリストを使うか検討。現状は同じリスト。
+
+        self.ai_char_combo['values'] = char_names
+        if char_names:
+            # 以前選択されていたキャラクターがいればそれを維持、なければ最初のものを選択
+            current_ai_char = self.ai_char_var.get()
+            if current_ai_char and current_ai_char in char_names:
+                self.ai_char_var.set(current_ai_char)
+            else:
+                self.ai_char_var.set(char_names[0])
+
+        self.user_char_combo['values'] = char_names
+        if char_names:
+            # ユーザーキャラクターのデフォルトはAIキャラクターと同じか、別のものにするか検討
+            # ここでは、AIキャラと同じものを初期選択とする (もしAIキャラが選択されていれば)
+            current_user_char = self.user_char_var.get()
+            if current_user_char and current_user_char in char_names:
+                self.user_char_var.set(current_user_char)
+            elif self.ai_char_var.get() and self.ai_char_var.get() in char_names: # AIキャラが選択されていればそれに合わせる
+                self.user_char_var.set(self.ai_char_var.get())
+            elif char_names: # それもなければ最初のもの
+                self.user_char_var.set(char_names[0])
+
+        self.log("AIチャット: キャラクタープルダウンを更新しました。")
 
     def create_ai_theater_tab(self):
         """AI劇場タブを作成"""
@@ -4243,7 +4522,7 @@ class AITuberMainGUI:
         history_spinbox = ttk.Spinbox(system_grid, from_=0, to=100, increment=1, # UI for setting conversation history length
                                       textvariable=self.conversation_history_length_var, width=5)
         history_spinbox.grid(row=1, column=1, sticky=tk.W, padx=20, pady=5)
-        ttk.Label(system_grid, text="(0で履歴なし、最大100件)").grid(row=1, column=2, sticky=tk.W, pady=5, padx=5)
+        ttk.Label(system_grid, text="(0で履歴なし、最大100件。YouTubeライブとデバッグタブのチャットに適用)").grid(row=1, column=2, sticky=tk.W, pady=5, padx=5)
 
         # 設定保存ボタン
         save_frame = ttk.Frame(settings_frame)
@@ -4589,10 +4868,13 @@ class AITuberMainGUI:
                 data.get('name', 'Unknown'),
                 self._get_character_type(data),
                 data.get('voice_settings', {}).get('model', 'Default'),
-                data.get('voice_settings', {}).get('engine', 'avis_speech')
+                data.get('voice_settings', {}).get('engine', 'avis_speech'), # カンマが抜けていたのを修正
+                data.get('created_at', 'N/A') # created_at を表示に追加
             ))
         
         self.log(f"📝 キャラクターリストを更新（{len(characters)}件）")
+        if hasattr(self, 'populate_chat_character_dropdowns'): # AIチャットタブが初期化されていれば
+            self.populate_chat_character_dropdowns()
     
     def _get_character_type(self, char_data):
         """キャラクタータイプを推定"""
