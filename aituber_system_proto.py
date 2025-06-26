@@ -2438,6 +2438,7 @@ class AITuberMainGUI:
     
     def __init__(self):
         self.root = tk.Tk()
+        self.log_text = None # log_text を None で初期化
         self.root.title("AITuber完全版システム v2.2 - 4エンジン完全対応版（2025年5月最新・機能削減なし）")
         self.root.geometry("1100x950")
         
@@ -5586,9 +5587,13 @@ class AITuberMainGUI:
         timestamp = datetime.now().strftime("%H:%M:%S")
         log_message = f"[{timestamp}] {message}\n"
         
-        if self.log_text:
+        # self.log_text が None でないことを確認してからGUIに書き込む
+        if self.log_text is not None:
             self.root.after(0, lambda: self.log_text.insert(tk.END, log_message))
             self.root.after(0, lambda: self.log_text.see(tk.END))
+        else:
+            # log_text がまだ初期化されていない場合は、標準出力にのみ表示
+            print(f"[GUI Log Text Not Initialized] {log_message.strip()}")
         
         print(log_message.strip())
         
