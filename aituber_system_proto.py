@@ -45,6 +45,7 @@ import wave # wave モジュールをインポート
 import re # 正規表現モジュールをインポート
 import json # JSONモジュールをインポート (macOSデバイス取得で使用)
 import csv
+import traceback # エラー追跡用に追加
 
 # 設定管理クラス（完全版）
 class ConfigManager:
@@ -81,7 +82,8 @@ class ConfigManager:
                 "audio_device": "default",
                 "cost_mode": "free",
                 "conversation_history_length": 0, # 会話履歴の保持数 (0は記憶なし、1以上でその回数分の直近の会話を記憶)
-                "text_generation_model": "gemini-1.5-flash-latest" # デフォルトのテキスト生成モデルを更新
+                "text_generation_model": "gemini-1.5-flash-latest", # デフォルトのテキスト生成モデルを更新
+                "ai_chat_processing_mode": "sequential" # "sequential" または "parallel"
             },
             "characters": {},
             "streaming_settings": {
@@ -2725,12 +2727,78 @@ class AITuberMainGUI:
 
         self.chat_message_entry.delete(0, tk.END)
 
-        # ユーザー発話の音声再生 (スレッドで実行)
-        if self.play_user_speech_var.get():
-            threading.Thread(target=self._play_character_speech, args=(user_char_name, user_input), daemon=True).start()
+        # 2. 設定に応じて処理方式を分岐
+        processing_mode = self.config.get_system_setting("ai_chat_processing_mode", "sequential")
+        self.log(f"AIチャット処理モード: {processing_mode}")
 
-        # AI応答の生成と表示 (スレッドで実行)
-        threading.Thread(target=self._generate_and_display_ai_response_for_chat, args=(user_input, ai_char_name, user_char_name), daemon=True).start()
+        if processing_mode == "sequential":
+            # シーケンシャル処理: ユーザー音声再生後にAI応答
+            if self.play_user_speech_var.get():
+                self.log(f"AIチャット (Sequential): ユーザー発話 ('{user_input[:20]}...') の再生を開始し、完了後にAI応答をトリガーします。")
+                user_speech_thread = threading.Thread(
+                    target=self._play_user_speech_and_trigger_ai,
+                    args=(user_char_name, user_input, ai_char_name, user_char_name),
+                    daemon=True
+                )
+                user_speech_thread.start()
+            else:
+                self.log(f"AIチャット (Sequential): ユーザー発話再生はオフ。直接AI応答生成を開始します。")
+                threading.Thread(
+                    target=self._generate_and_display_ai_response_for_chat,
+                    args=(user_input, ai_char_name, user_char_name),
+                    daemon=True
+                ).start()
+        elif processing_mode == "parallel":
+            # パラレル処理: ユーザー音声再生とAI応答生成を並行
+            self.log(f"AIチャット (Parallel): ユーザー発話再生とAI応答生成を並行して開始します。")
+            if self.play_user_speech_var.get():
+                # ユーザー発話の音声再生 (スレッドで実行)
+                threading.Thread(target=self._play_character_speech, args=(user_char_name, user_input), daemon=True).start()
+
+            # AI応答の生成と表示 (スレッドで実行) - ユーザー音声再生とは独立して開始
+            threading.Thread(target=self._generate_and_display_ai_response_for_chat, args=(user_input, ai_char_name, user_char_name), daemon=True).start()
+        else: # 不明なモードの場合はデフォルトのシーケンシャルとして扱う
+            self.log(f"AIチャット: 不明な処理モード '{processing_mode}' のため、シーケンシャル処理を実行します。")
+            if self.play_user_speech_var.get():
+                user_speech_thread = threading.Thread(
+                    target=self._play_user_speech_and_trigger_ai,
+                    args=(user_char_name, user_input, ai_char_name, user_char_name),
+                    daemon=True
+                )
+                user_speech_thread.start()
+            else:
+                threading.Thread(
+                    target=self._generate_and_display_ai_response_for_chat,
+                    args=(user_input, ai_char_name, user_char_name),
+                    daemon=True
+                ).start()
+
+    def _play_user_speech_and_trigger_ai(self, user_char_name, user_input_text, ai_char_name_for_next_step, user_char_name_for_next_step):
+        """
+        ユーザーの音声を再生し、その再生が完了した後にAIの応答生成処理をトリガーする。
+        このメソッド全体がスレッドで実行されることを想定。
+        """
+        try:
+            self.log(f"AIチャット: ユーザー '{user_char_name}' の発話 ('{user_input_text[:20]}...') の音声再生処理を開始。")
+            # ユーザーの音声を再生する (このメソッドは内部で非同期処理を呼び出す場合があるが、ここでは完了を待つ)
+            # _play_character_speech は内部で asyncio ループを作成・実行するため、
+            # このスレッド内ではその完了を待機する形になる。
+            self._play_character_speech(user_char_name, user_input_text)
+            self.log(f"AIチャット: ユーザー '{user_char_name}' の発話再生完了。AI応答生成をトリガーします。")
+
+            # AI応答生成をトリガー
+            # この呼び出しもスレッド内で行われるが、_generate_and_display_ai_response_for_chat
+            # 自体がGUI更新を含むため、その中のGUI操作は self.root.after を使っていることを確認。
+            self._generate_and_display_ai_response_for_chat(user_input_text, ai_char_name_for_next_step, user_char_name_for_next_step)
+
+        except Exception as e:
+            self.log(f"AIチャット: _play_user_speech_and_trigger_ai 処理中にエラー: {e}\n{traceback.format_exc()}")
+            # エラーが発生した場合でも、AIの応答生成を試みるか、あるいはエラー処理を行う
+            # ここでは、ユーザー音声再生でエラーが起きても、AI応答は試みる設計とする
+            self.log(f"AIチャット: ユーザー音声再生中にエラーが発生しましたが、AI応答生成は試行します。")
+            # 引数名を修正して呼び出し
+            self._generate_and_display_ai_response_for_chat(user_input_text, ai_char_name_for_next_step, user_char_name_for_next_step)
+
 
     def _add_message_to_chat_display(self, talker_display_name, message_content, is_user_message=False):
         """チャット表示TreeViewにメッセージを追加する"""
@@ -4743,6 +4811,26 @@ class AITuberMainGUI:
             state="readonly", width=47
         )
         self.text_generation_model_combo.grid(row=2, column=1, padx=10, pady=2, sticky=tk.W)
+
+        # AIチャット設定フレーム (新規追加)
+        ai_chat_settings_frame = ttk.LabelFrame(settings_frame, text="AIチャット設定", padding="10")
+        ai_chat_settings_frame.pack(fill=tk.X, padx=10, pady=5)
+
+        ai_chat_grid = ttk.Frame(ai_chat_settings_frame)
+        ai_chat_grid.pack(fill=tk.X)
+
+        ttk.Label(ai_chat_grid, text="AIチャット処理方式:").grid(row=0, column=0, sticky=tk.W, pady=2)
+        self.ai_chat_processing_mode_var = tk.StringVar()
+        self.ai_chat_processing_mode_combo = ttk.Combobox( # Comboboxのインスタンスをselfに保存
+            ai_chat_grid,
+            textvariable=self.ai_chat_processing_mode_var,
+            values=["sequential (推奨)", "parallel"],
+            state="readonly",
+            width=25
+        )
+        self.ai_chat_processing_mode_combo.grid(row=0, column=1, padx=10, pady=2, sticky=tk.W)
+        ttk.Label(ai_chat_grid, text="sequential: ユーザー音声再生後にAI応答 / parallel: 並行処理").grid(row=0, column=2, sticky=tk.W, padx=5)
+
         
         # 音声エンジン設定（4エンジン完全対応）
         voice_frame = ttk.LabelFrame(settings_frame, text="音声エンジン設定（4エンジン完全対応）", padding="10")
@@ -5055,6 +5143,17 @@ class AITuberMainGUI:
         elif self._get_display_gemini_models(): # フォールバック
             self.text_generation_model_var.set(self._get_display_gemini_models()[0])
 
+        # AIチャット処理方式の読み込み (新規追加)
+        ai_chat_mode = self.config.get_system_setting("ai_chat_processing_mode", "sequential")
+        current_combo_values_chat_mode = self.ai_chat_processing_mode_combo['values'] # ("sequential (推奨)", "parallel")
+
+        if ai_chat_mode == "sequential" and "sequential (推奨)" in current_combo_values_chat_mode:
+            self.ai_chat_processing_mode_var.set("sequential (推奨)")
+        elif ai_chat_mode == "parallel" and "parallel" in current_combo_values_chat_mode:
+            self.ai_chat_processing_mode_var.set("parallel")
+        else: # マッチしない場合や設定ファイルにない場合はデフォルト (sequential (推奨))
+            self.ai_chat_processing_mode_var.set("sequential (推奨)")
+
 
         # システム音声エンジン変更時の情報表示を初期化
         self.on_system_engine_changed()
@@ -5103,6 +5202,17 @@ class AITuberMainGUI:
             selected_display_name = self.text_generation_model_var.get()
             internal_model_name = self._get_internal_gemini_model_name(selected_display_name)
             self.config.set_system_setting("text_generation_model", internal_model_name)
+
+            # AIチャット処理方式の保存 (新規追加)
+            selected_chat_mode_display = self.ai_chat_processing_mode_var.get()
+            if selected_chat_mode_display == "sequential (推奨)":
+                chat_mode_to_save = "sequential"
+            elif selected_chat_mode_display == "parallel":
+                chat_mode_to_save = "parallel"
+            else: # 念のためフォールバック
+                chat_mode_to_save = "sequential"
+            self.config.set_system_setting("ai_chat_processing_mode", chat_mode_to_save)
+
 
             # 音声出力デバイス設定の保存
             selected_audio_device_name = self.audio_output_device_var.get()
