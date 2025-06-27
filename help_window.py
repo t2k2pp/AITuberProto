@@ -1,29 +1,34 @@
-import tkinter as tk
-from tkinter import ttk
+import customtkinter
+import tkinter as tk # 基本的な型 (StringVarなど) と標準ダイアログのため
 import webbrowser
+import sys # フォント選択のため
 
 class HelpWindow:
-    def __init__(self, root):
+    def __init__(self, root: customtkinter.CTk):
         self.root = root
         self.root.title("ヘルプ - エンジン起動ガイド")
-        self.root.geometry("700x550") # 少し広め
+        self.root.geometry("750x600") # サイズ調整
+
+        # フォント設定
+        self.default_font = ("Yu Gothic UI", 12)
+        if sys.platform == "darwin": self.default_font = ("Hiragino Sans", 14)
+        elif sys.platform.startswith("linux"): self.default_font = ("Noto Sans CJK JP", 12)
+        self.label_font = (self.default_font[0], self.default_font[1] + 1, "bold")
+        self.text_font = (self.default_font[0], self.default_font[1] -1) # Textboxは少し小さめでも良いかも
 
         self.create_widgets()
 
     def create_widgets(self):
-        main_frame = ttk.Frame(self.root, padding="10")
-        main_frame.pack(fill=tk.BOTH, expand=True)
+        main_frame = customtkinter.CTkScrollableFrame(self.root) # スクロール可能に
+        main_frame.pack(fill="both", expand=True, padx=10, pady=10)
 
-        # --- gui.py の create_settings_tab 内のヘルプ部分を参考にUI要素を配置 ---
-        help_content_frame = ttk.LabelFrame(main_frame, text="エンジン起動ガイド v2.2（4エンジン完全対応）", padding="10")
-        help_content_frame.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
+        help_content_outer_frame = customtkinter.CTkFrame(main_frame)
+        help_content_outer_frame.pack(fill="both", expand=True, padx=5, pady=5)
+        customtkinter.CTkLabel(help_content_outer_frame, text="エンジン起動ガイド v2.2（4エンジン完全対応）", font=self.label_font).pack(anchor="w", padx=10, pady=(5,5))
 
-        guide_text_widget = tk.Text(help_content_frame, height=18, width=80, wrap=tk.WORD, state=tk.DISABLED, relief=tk.FLAT, bg=self.root.cget('bg'))
-        guide_scroll = ttk.Scrollbar(help_content_frame, orient=tk.VERTICAL, command=guide_text_widget.yview)
-        guide_text_widget.configure(yscrollcommand=guide_scroll.set)
-
-        guide_text_widget.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=5, pady=5)
-        guide_scroll.pack(side=tk.RIGHT, fill=tk.Y)
+        # tk.Text -> customtkinter.CTkTextbox
+        guide_text_widget = customtkinter.CTkTextbox(help_content_outer_frame, height=350, width=700, wrap="word", font=self.text_font) # reliefとbgは不要
+        guide_text_widget.pack(fill="both", expand=True, padx=5, pady=5)
 
         guide_content = """
 🚀 【Google AI Studio新音声】- 2025年5月追加・最新技術
@@ -65,35 +70,36 @@ class HelpWindow:
 - その他:
     - アプリケーションのログ（メイン画面やコンソール）にエラーメッセージが出ていないか確認してください。
 """
-        guide_text_widget.config(state=tk.NORMAL)
-        guide_text_widget.delete(1.0, tk.END) # 念のためクリア
-        guide_text_widget.insert(tk.END, guide_content.strip())
-        guide_text_widget.config(state=tk.DISABLED)
+        guide_text_widget.insert("1.0", guide_content.strip())
+        guide_text_widget.configure(state="disabled") # 編集不可
 
         # 外部リンクボタンフレーム
-        link_frame = ttk.Frame(main_frame) # main_frameに配置
+        link_frame = customtkinter.CTkFrame(main_frame, fg_color="transparent")
         link_frame.pack(pady=10)
 
         buttons_info = [
             ("🎨 VRoid Studio", "https://vroid.com/studio"),
             ("📹 VSeeFace", "https://www.vseeface.icu/"),
-            ("🎙️ Avis Speech", "https://github.com/Aivis-Project/AivisSpeech-Engine"), # 正しいURLに修正
-            ("🎤 VOICEVOX", "https://voicevox.hiroshiba.jp/") # 公式サイト
+            ("🎙️ Avis Speech", "https://github.com/Aivis-Project/AivisSpeech-Engine"),
+            ("🎤 VOICEVOX", "https://voicevox.hiroshiba.jp/")
         ]
 
         for text, url in buttons_info:
-            button = ttk.Button(link_frame, text=text, command=lambda u=url: webbrowser.open(u))
-            button.pack(side=tk.LEFT, padx=5, pady=5)
+            button = customtkinter.CTkButton(link_frame, text=text, command=lambda u=url: webbrowser.open(u), font=self.default_font)
+            button.pack(side="left", padx=5, pady=5)
 
         # 閉じるボタン
-        close_button = ttk.Button(main_frame, text="閉じる", command=self.root.destroy)
+        close_button = customtkinter.CTkButton(main_frame, text="閉じる", command=self.root.destroy, font=self.default_font)
         close_button.pack(pady=10)
 
-
 def main():
-    root = tk.Tk()
+    customtkinter.set_appearance_mode("System")
+    customtkinter.set_default_color_theme("blue")
+    root = customtkinter.CTk()
     app = HelpWindow(root)
     root.mainloop()
 
 if __name__ == "__main__":
+    customtkinter.set_appearance_mode("System")
+    customtkinter.set_default_color_theme("blue")
     main()
