@@ -217,13 +217,45 @@ class AudioPlayer:
                 if result.returncode == 0:
                     for line in result.stdout.splitlines():
                         parts = line.strip().split()
-                        if len(parts) >= 2:
+                        if not parts:
+                            continue
+
+                        is_default_str = ""
+                        name_parts_end_index = len(parts)
+                        dev_id_candidate = ""
+
+                        # Check if the last part is "True" or "False"
+                        if parts[-1] in ("True", "False"):
+                            if len(parts) < 2: # Needs at least ID and the boolean string
+                                logger.warning(f"Skipping malformed audio device line (too short with boolean): {line}")
+                                continue
                             is_default_str = parts[-1]
-                            dev_id_candidate = parts[-2] if (is_default_str == "True" or is_default_str == "False") and len(parts) > 2 else parts[-1]
-                            name_parts_end_index = -2 if (is_default_str == "True" or is_default_str == "False") and len(parts) > 2 else -1
-                            name = " ".join(parts[:name_parts_end_index]).strip()
-                            if name and dev_id_candidate and not any(d["id"] == dev_id_candidate for d in devices):
-                                devices.append({"name": name, "id": dev_id_candidate})
+                            dev_id_candidate = parts[-2]
+                            name_parts_end_index = -2
+                        else: # Last part is assumed to be part of the ID or the ID itself
+                            if len(parts) < 1: # Should not happen if `if not parts:` check passed
+                                continue
+                            dev_id_candidate = parts[-1] # Assume last part is ID if no True/False
+                            name_parts_end_index = -1
+
+                        name = " ".join(parts[:name_parts_end_index]).strip()
+
+                        # Basic validation
+                        if not name:
+                            # If name is empty, it might be because the ID was the only thing on the line after True/False
+                            # or the line was just an ID.
+                            # Example: "DeviceID True" -> name="", id="DeviceID" (bad)
+                            # Example: "DeviceID" -> name="", id="DeviceID" (bad)
+                            # We expect the name to be present.
+                            logger.warning(f"Skipping audio device with empty name: original line '{line}'")
+                            continue
+
+                        if not dev_id_candidate: # Should ideally not happen if logic is correct
+                            logger.warning(f"Skipping audio device with empty ID: original line '{line}'")
+                            continue
+
+                        if not any(d["id"] == dev_id_candidate for d in devices):
+                            devices.append({"name": name, "id": dev_id_candidate})
             elif self.system == "Darwin":
                 import subprocess; import json
                 cmd = "system_profiler SPAudioDataType -json"
