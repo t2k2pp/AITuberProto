@@ -3,12 +3,15 @@ from tkinter import ttk
 import subprocess
 import sys
 import os
+import tkinter.messagebox # メッセージボックスのインポート
 
 class LauncherWindow:
     def __init__(self, root):
         self.root = root
         self.root.title("AITuber Launcher")
         self.root.geometry("400x450")
+
+        self.active_modules = {} # 起動中のモジュールを管理
 
         # スタイル設定
         style = ttk.Style()
@@ -61,26 +64,59 @@ class LauncherWindow:
         button_frame.grid_columnconfigure(0, weight=1)
         button_frame.grid_columnconfigure(1, weight=1)
 
+        self.check_active_modules() # 起動中モジュールの状態確認を開始
 
     def launch_module(self, module_name):
+        # アクティブなモジュールリストから終了したプロセスをクリーンアップ
+        # (check_active_modulesでも行われるが、起動直前にも行うことでより確実に)
+        ended_modules = [m for m, p in self.active_modules.items() if p.poll() is not None]
+        for m in ended_modules:
+            del self.active_modules[m]
+            print(f"Cleaned up ended module: {m}")
+
+        if module_name in self.active_modules:
+            process = self.active_modules[module_name]
+            if process.poll() is None: # プロセスがまだ実行中
+                print(f"{module_name} is already running.")
+                tk.messagebox.showinfo("情報", f"{module_name} は既に起動しています。")
+                return
+            else: # プロセスは終了しているが、リストに残っていた場合 (念のため)
+                print(f"{module_name} was in active_modules but process ended. Removing.")
+                del self.active_modules[module_name]
+
         print(f"Launching {module_name}...")
         try:
-            # Pythonインタープリタのパスを取得
             python_executable = sys.executable
-            # スクリプトの絶対パスを取得
             script_path = os.path.join(os.path.dirname(__file__), module_name)
 
             if not os.path.exists(script_path):
                 print(f"Error: {script_path} not found.")
-                # ここでユーザーにエラーを通知するUI要素を追加することも検討
                 tk.messagebox.showerror("起動エラー", f"{module_name} が見つかりません。")
                 return
 
-            # 新しいプロセスとして各機能ウィンドウを起動
-            subprocess.Popen([python_executable, script_path])
+            process = subprocess.Popen([python_executable, script_path])
+            self.active_modules[module_name] = process # 起動したプロセスを登録
+            print(f"{module_name} launched and registered.")
+
         except Exception as e:
             print(f"Error launching {module_name}: {e}")
             tk.messagebox.showerror("起動エラー", f"{module_name} の起動中にエラーが発生しました:\n{e}")
+
+    def check_active_modules(self):
+        """起動中のモジュールの状態を定期的に確認し、終了したものをリストから削除する"""
+        ended_modules = []
+        for module_name, process in self.active_modules.items():
+            if process.poll() is not None: # プロセスが終了した
+                ended_modules.append(module_name)
+                print(f"Module {module_name} has ended (PID: {process.pid}).")
+
+        for module_name in ended_modules:
+            if module_name in self.active_modules: # 二重チェック (稀なケースだが安全のため)
+                del self.active_modules[module_name]
+                print(f"Removed {module_name} from active modules.")
+
+        # 次回のチェックをスケジュール (1000ms = 1秒後)
+        self.root.after(1000, self.check_active_modules)
 
 
 def main():
