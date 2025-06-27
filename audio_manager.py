@@ -176,7 +176,8 @@ class SystemTTSAPI(VoiceEngineBase):
             if success and os.path.exists(fname) and os.path.getsize(fname) > 44: return [fname]
             if os.path.exists(fname): os.unlink(fname)
             return []
-        except Exception as e: logger.error(f"SystemTTS Error: {e}"); if os.path.exists(fname): os.unlink(fname); return []
+        except Exception as e: logger.error(f"SystemTTS Error: {e}"); 
+        if os.path.exists(fname): os.unlink(fname); return []
 
     async def _windows_tts(self, text, path, voice, spd):
         rate = int(max(-10, min(10, (spd - 1.0) * 5)))
