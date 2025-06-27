@@ -1,38 +1,51 @@
-import tkinter as tk
-from tkinter import ttk, messagebox, filedialog, simpledialog
+import customtkinter
+import tkinter as tk # messagebox, filedialog, simpledialog, StringVar など基本的な型のため
+from tkinter import messagebox, filedialog, simpledialog # 標準ダイアログはそのまま使用
+import sys # プラットフォーム判定やフォント設定のため
 import json
 import os
 import webbrowser
-import asyncio # _run_google_ai_studio_test, test_avis_speech, _run_avis_speech_test, test_voicevox, _run_voicevox_test で必要
-import requests # test_youtube_api で必要
-from pathlib import Path # create_full_backup で必要 (ただし、AITuberMainGUIクラスのメソッドなので、移植時に検討)
+import asyncio
+import requests
+from pathlib import Path
+from datetime import datetime # logメソッドで使用
 
-# 外部依存クラス (実際のプロジェクトでは適切にimport)
 from config import ConfigManager
 from audio_manager import VoiceEngineManager, AudioPlayer, GoogleAIStudioNewVoiceAPI, AvisSpeechEngineAPI, VOICEVOXEngineAPI
-# from character_manager import CharacterManager # settings_window.py単体では直接使わないが、関連機能で必要になる可能性あり
 
-# loggingについては、このファイル単体で動作させる場合に設定
 import logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
 class SettingsWindow:
-    def __init__(self, root):
-        self.root = root
+    def __init__(self, root: customtkinter.CTk): # 親ウィンドウもCTkであることを想定
+        self.root = root # CTkToplevelの親になる
+        # SettingsWindow自体がメインウィンドウになる場合 (単体テストなど)
+        # if not isinstance(root, customtkinter.CTk) and not isinstance(root, customtkinter.CTkToplevel):
+        #     self.app_root = customtkinter.CTk()
+        # else:
+        #     self.app_root = root
+
+        # このウィンドウはToplevelとして作成する想定がより自然かもしれないが、
+        # launcher.py から起動される各ウィンドウは独立したプロセスでtk.Tk()をルートとしていた。
+        # その構造を踏襲し、このSettingsWindowも独自のルートを持つようにする。
+        # ただし、customtkinterでは通常、メインのCTkインスタンスは一つ。
+        # ここでは、渡されたroot (main.pyで作成されたCTkインスタンス) の上に
+        # 直接ウィジェットを配置するのではなく、もしSettingsWindowが
+        # Toplevelとして開かれるべきなら、呼び出し側でCTkToplevelを作成し、
+        # そのインスタンスをこのクラスのコンストラクタに渡す形になる。
+        # 今回は、各ウィンドウが独自のメインループを持つ元の構造を維持しつつ、
+        # customtkinter化するため、self.rootをそのまま使う。
+        # launcherから呼び出されるので、self.rootは実質的に新しいCTk()インスタンスとなる。
+
         self.root.title("設定画面")
-        self.root.geometry("800x750") # 少し大きめに
+        self.root.geometry("850x800") # レイアウト調整のため少し拡大
 
-        # --- AITuberMainGUIからの移植・模倣 ---
         self.config = ConfigManager()
-        self.voice_manager = VoiceEngineManager() # test_google_ai_studio などで使用
-        self.audio_player = AudioPlayer(config_manager=self.config) # populate_audio_output_devices などで使用
-        # self.character_manager = CharacterManager(self.config) # 必要に応じて
+        self.voice_manager = VoiceEngineManager()
+        self.audio_player = AudioPlayer(config_manager=self.config)
+        self.log_text_widget = None # オプション
 
-        # ログ出力用 (AITuberMainGUIのlogメソッドを模倣)
-        self.log_text_widget = None # あとで Text ウィジェットを割り当てる (オプション)
-
-        # Geminiモデルリスト (AITuberMainGUIからコピー)
         self.available_gemini_models = [
             "gemini-1.5-flash", "gemini-1.5-flash-latest",
             "gemini-1.5-pro", "gemini-1.5-pro-latest",
@@ -41,182 +54,189 @@ class SettingsWindow:
         def sort_key_gemini(model_name):
             parts = model_name.split('-')
             version_str = parts[1]
-            try:
-                version_major = float(version_str)
+            try: version_major = float(version_str)
             except ValueError: version_major = 0
             precision_order = {"lite": 0, "flash": 1, "pro": 2}
             precision_val = precision_order.get(parts[2] if len(parts) > 2 else (parts[0] if parts[0] in precision_order else "flash"), 1)
             is_latest = "latest" in model_name
             return (version_major, precision_val, is_latest)
         self.available_gemini_models.sort(key=sort_key_gemini)
-        # --- ここまで AITuberMainGUIからの移植・模倣 ---
+
+        # フォント定義 (例)
+        self.default_font = ("Yu Gothic UI", 12)
+        if sys.platform == "darwin": self.default_font = ("Hiragino Sans", 14)
+        elif sys.platform.startswith("linux"): self.default_font = ("Noto Sans CJK JP", 12)
+
 
         self.create_widgets()
         self.load_settings_to_gui()
 
     def log(self, message):
-        # print(f"LOG: {message}") # コンソールへの簡易ログ
         logger.info(message)
-        if self.log_text_widget: # オプションのログ表示ウィジェットがあれば更新
+        if self.log_text_widget and isinstance(self.log_text_widget, customtkinter.CTkTextbox):
             timestamp = datetime.now().strftime("%H:%M:%S")
             log_message = f"[{timestamp}] {message}\n"
             self.log_text_widget.insert(tk.END, log_message)
             self.log_text_widget.see(tk.END)
 
     def create_widgets(self):
-        notebook = ttk.Notebook(self.root)
-        notebook.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
+        # ttk.Notebook -> CTkTabview
+        tabview = customtkinter.CTkTabview(self.root, width=800, height=700)
+        tabview.pack(fill="both", expand=True, padx=10, pady=10)
 
-        # 「設定」タブ部分 (旧 create_settings_tab からエンジン起動ガイド部を除く)
-        settings_tab_frame = ttk.Frame(notebook)
-        notebook.add(settings_tab_frame, text="⚙️ 基本設定")
-        self._create_actual_settings_content(settings_tab_frame) # メソッド化
+        tab_basic = tabview.add("⚙️ 基本設定")
+        tab_advanced = tabview.add("🚀 高度な機能")
 
-        # 「高度な機能」タブ部分 (旧 create_advanced_tab から)
-        advanced_tab_frame = ttk.Frame(notebook)
-        notebook.add(advanced_tab_frame, text="🚀 高度な機能")
-        self._create_advanced_features_content(advanced_tab_frame) # メソッド化
+        self._create_actual_settings_content(tab_basic)
+        self._create_advanced_features_content(tab_advanced)
 
-    def _create_actual_settings_content(self, parent_frame):
+    def _create_actual_settings_content(self, parent_tab_frame: customtkinter.CTkFrame):
+        # ラベルフレームの代わりにCTkFrameを使用し、内部にラベルを配置
         # API設定
-        api_frame = ttk.LabelFrame(parent_frame, text="API設定 v2.2（4エンジン完全対応）", padding="10")
-        api_frame.pack(fill=tk.X, padx=10, pady=5)
-        api_grid = ttk.Frame(api_frame)
-        api_grid.pack(fill=tk.X)
+        api_outer_frame = customtkinter.CTkFrame(parent_tab_frame)
+        api_outer_frame.pack(fill="x", padx=10, pady=(10,5))
+        customtkinter.CTkLabel(api_outer_frame, text="API設定 v2.2（4エンジン完全対応）", font=(self.default_font[0], self.default_font[1]+2, "bold")).pack(anchor="w", padx=10, pady=(5,0))
+        api_frame = customtkinter.CTkFrame(api_outer_frame) # 内側のフレームでパディング
+        api_frame.pack(fill="x", padx=10, pady=5)
 
-        ttk.Label(api_grid, text="Google AI Studio APIキー（文章生成＋新音声合成）:").grid(row=0, column=0, sticky=tk.W, pady=2)
+        # Google AI
+        customtkinter.CTkLabel(api_frame, text="Google AI Studio APIキー:", font=self.default_font).grid(row=0, column=0, sticky="w", pady=5, padx=5)
         self.google_ai_var = tk.StringVar()
-        ai_entry = ttk.Entry(api_grid, textvariable=self.google_ai_var, width=50, show="*")
-        ai_entry.grid(row=0, column=1, padx=10, pady=2)
-        ttk.Button(api_grid, text="テスト", command=self.test_google_ai_studio).grid(row=0, column=2, padx=5)
+        ai_entry = customtkinter.CTkEntry(api_frame, textvariable=self.google_ai_var, width=350, show="*", font=self.default_font)
+        ai_entry.grid(row=0, column=1, padx=5, pady=5, sticky="ew")
+        customtkinter.CTkButton(api_frame, text="テスト", command=self.test_google_ai_studio, font=self.default_font, width=80).grid(row=0, column=2, padx=5, pady=5)
 
-        ttk.Label(api_grid, text="YouTube APIキー（配信用）:").grid(row=1, column=0, sticky=tk.W, pady=2)
+        # YouTube API
+        customtkinter.CTkLabel(api_frame, text="YouTube APIキー:", font=self.default_font).grid(row=1, column=0, sticky="w", pady=5, padx=5)
         self.youtube_api_var = tk.StringVar()
-        youtube_entry = ttk.Entry(api_grid, textvariable=self.youtube_api_var, width=50, show="*")
-        youtube_entry.grid(row=1, column=1, padx=10, pady=2)
-        ttk.Button(api_grid, text="テスト", command=self.test_youtube_api).grid(row=1, column=2, padx=5)
+        youtube_entry = customtkinter.CTkEntry(api_frame, textvariable=self.youtube_api_var, width=350, show="*", font=self.default_font)
+        youtube_entry.grid(row=1, column=1, padx=5, pady=5, sticky="ew")
+        customtkinter.CTkButton(api_frame, text="テスト", command=self.test_youtube_api, font=self.default_font, width=80).grid(row=1, column=2, padx=5, pady=5)
 
-        ttk.Label(api_grid, text="テキスト生成モデル (Gemini/Local):").grid(row=2, column=0, sticky=tk.W, pady=2)
+        # Text Generation Model
+        customtkinter.CTkLabel(api_frame, text="テキスト生成モデル:", font=self.default_font).grid(row=2, column=0, sticky="w", pady=5, padx=5)
         self.text_generation_model_var = tk.StringVar()
-        self.text_generation_model_combo = ttk.Combobox(
-            api_grid, textvariable=self.text_generation_model_var,
+        self.text_generation_model_combo = customtkinter.CTkComboBox(
+            api_frame, variable=self.text_generation_model_var,
             values=self._get_display_text_generation_models(),
-            state="readonly", width=47
+            state="readonly", width=350, font=self.default_font,
+            command=self._on_text_generation_model_changed # commandでコールバック
         )
-        self.text_generation_model_combo.grid(row=2, column=1, padx=10, pady=2, sticky=tk.W)
-        self.text_generation_model_combo.bind('<<ComboboxSelected>>', self._on_text_generation_model_changed)
+        self.text_generation_model_combo.grid(row=2, column=1, padx=5, pady=5, sticky="ew")
 
-        self.local_llm_endpoint_label = ttk.Label(api_grid, text="LM Studio エンドポイントURL:")
-        self.local_llm_endpoint_label.grid(row=3, column=0, sticky=tk.W, pady=2)
-        self.local_llm_endpoint_label.grid_remove()
+        # LM Studio Endpoint (最初は非表示)
+        self.local_llm_endpoint_label = customtkinter.CTkLabel(api_frame, text="LM Studio エンドポイントURL:", font=self.default_font)
         self.local_llm_endpoint_url_var = tk.StringVar()
-        self.local_llm_endpoint_entry = ttk.Entry(api_grid, textvariable=self.local_llm_endpoint_url_var, width=50)
-        self.local_llm_endpoint_entry.grid(row=3, column=1, padx=10, pady=2, sticky=tk.W)
-        self.local_llm_endpoint_entry.grid_remove()
-        self.local_llm_endpoint_hint_label = ttk.Label(api_grid, text="例: http://127.0.0.1:1234/v1/chat/completions", foreground="gray")
-        self.local_llm_endpoint_hint_label.grid(row=4, column=1, sticky=tk.W, padx=10, pady=(0,5))
-        self.local_llm_endpoint_hint_label.grid_remove()
+        self.local_llm_endpoint_entry = customtkinter.CTkEntry(api_frame, textvariable=self.local_llm_endpoint_url_var, width=350, font=self.default_font)
+        self.local_llm_endpoint_hint_label = customtkinter.CTkLabel(api_frame, text="例: http://127.0.0.1:1234/v1/chat/completions", font=(self.default_font[0], self.default_font[1]-2), text_color="gray")
+        # .grid() と .grid_remove() は後で _on_text_generation_model_changed で制御
 
+        api_frame.grid_columnconfigure(1, weight=1) # EntryとComboBoxが伸びるように
 
         # AIチャット設定
-        ai_chat_settings_frame = ttk.LabelFrame(parent_frame, text="AIチャット設定", padding="10")
-        ai_chat_settings_frame.pack(fill=tk.X, padx=10, pady=5)
-        ai_chat_grid = ttk.Frame(ai_chat_settings_frame)
-        ai_chat_grid.pack(fill=tk.X)
-        ttk.Label(ai_chat_grid, text="AIチャット処理方式:").grid(row=0, column=0, sticky=tk.W, pady=2)
+        ai_chat_outer_frame = customtkinter.CTkFrame(parent_tab_frame)
+        ai_chat_outer_frame.pack(fill="x", padx=10, pady=5)
+        customtkinter.CTkLabel(ai_chat_outer_frame, text="AIチャット設定", font=(self.default_font[0], self.default_font[1]+2, "bold")).pack(anchor="w", padx=10, pady=(5,0))
+        ai_chat_frame = customtkinter.CTkFrame(ai_chat_outer_frame)
+        ai_chat_frame.pack(fill="x", padx=10, pady=5)
+
+        customtkinter.CTkLabel(ai_chat_frame, text="AIチャット処理方式:", font=self.default_font).grid(row=0, column=0, sticky="w", padx=5, pady=5)
         self.ai_chat_processing_mode_var = tk.StringVar()
-        self.ai_chat_processing_mode_combo = ttk.Combobox(
-            ai_chat_grid, textvariable=self.ai_chat_processing_mode_var,
-            values=["sequential (推奨)", "parallel"], state="readonly", width=25
+        self.ai_chat_processing_mode_combo = customtkinter.CTkComboBox(
+            ai_chat_frame, variable=self.ai_chat_processing_mode_var,
+            values=["sequential (推奨)", "parallel"], state="readonly", width=200, font=self.default_font
         )
-        self.ai_chat_processing_mode_combo.grid(row=0, column=1, padx=10, pady=2, sticky=tk.W)
-        ttk.Label(ai_chat_grid, text="sequential: ユーザー音声再生後にAI応答 / parallel: 並行処理").grid(row=0, column=2, sticky=tk.W, padx=5)
+        self.ai_chat_processing_mode_combo.grid(row=0, column=1, padx=5, pady=5, sticky="w")
+        customtkinter.CTkLabel(ai_chat_frame, text="sequential: ユーザー音声再生後にAI応答 / parallel: 並行処理", font=self.default_font).grid(row=0, column=2, sticky="w", padx=5, pady=5)
 
 
         # 音声エンジン設定
-        voice_frame = ttk.LabelFrame(parent_frame, text="音声エンジン設定（4エンジン完全対応）", padding="10")
-        voice_frame.pack(fill=tk.X, padx=10, pady=5)
-        voice_grid = ttk.Frame(voice_frame)
-        voice_grid.pack(fill=tk.X)
+        voice_outer_frame = customtkinter.CTkFrame(parent_tab_frame)
+        voice_outer_frame.pack(fill="x", padx=10, pady=5)
+        customtkinter.CTkLabel(voice_outer_frame, text="音声エンジン設定（4エンジン完全対応）", font=(self.default_font[0], self.default_font[1]+2, "bold")).pack(anchor="w", padx=10, pady=(5,0))
+        voice_frame = customtkinter.CTkFrame(voice_outer_frame)
+        voice_frame.pack(fill="x", padx=10, pady=5)
 
-        ttk.Label(voice_grid, text="デフォルト音声エンジン:").grid(row=0, column=0, sticky=tk.W)
+        customtkinter.CTkLabel(voice_frame, text="デフォルト音声エンジン:", font=self.default_font).grid(row=0, column=0, sticky="w", padx=5, pady=5)
         self.voice_engine_var = tk.StringVar()
-        engine_combo = ttk.Combobox(voice_grid, textvariable=self.voice_engine_var,
+        engine_combo = customtkinter.CTkComboBox(voice_frame, variable=self.voice_engine_var,
                     values=["google_ai_studio_new", "avis_speech", "voicevox", "system_tts"],
-                    state="readonly", width=25)
-        engine_combo.grid(row=0, column=1, padx=10)
-        engine_combo.bind('<<ComboboxSelected>>', self.on_system_engine_changed)
-        self.system_engine_info = ttk.Label(voice_grid, text="", foreground="gray", wraplength=300)
-        self.system_engine_info.grid(row=0, column=2, padx=10, sticky=tk.W)
+                    state="readonly", width=200, font=self.default_font, command=self.on_system_engine_changed)
+        engine_combo.grid(row=0, column=1, padx=5, pady=5, sticky="w")
+        self.system_engine_info = customtkinter.CTkLabel(voice_frame, text="", font=self.default_font, wraplength=300)
+        self.system_engine_info.grid(row=0, column=2, padx=5, pady=5, sticky="w")
 
-        ttk.Label(voice_grid, text="音声出力デバイス:").grid(row=1, column=0, sticky=tk.W, pady=(10,0))
+        customtkinter.CTkLabel(voice_frame, text="音声出力デバイス:", font=self.default_font).grid(row=1, column=0, sticky="w", padx=5, pady=(10,5))
         self.audio_output_device_var = tk.StringVar()
-        self.audio_output_device_combo = ttk.Combobox(voice_grid, textvariable=self.audio_output_device_var,
-                                                     state="readonly", width=40)
-        self.audio_output_device_combo.grid(row=1, column=1, columnspan=2, padx=10, pady=(10,0), sticky=tk.W)
+        self.audio_output_device_combo = customtkinter.CTkComboBox(voice_frame, variable=self.audio_output_device_var,
+                                                     state="readonly", width=300, font=self.default_font)
+        self.audio_output_device_combo.grid(row=1, column=1, columnspan=2, padx=5, pady=(10,5), sticky="w")
         self.populate_audio_output_devices()
 
-        fallback_frame = ttk.Frame(voice_grid)
-        fallback_frame.grid(row=2, column=0, columnspan=3, sticky=tk.W, pady=10)
-        ttk.Label(fallback_frame, text="フォールバック有効:").pack(side=tk.LEFT)
-        self.fallback_enabled_var = tk.BooleanVar(value=True) # configから読み込むべき
-        ttk.Checkbutton(fallback_frame, variable=self.fallback_enabled_var).pack(side=tk.LEFT, padx=5)
-        ttk.Label(fallback_frame, text="フォールバック順序:").pack(side=tk.LEFT, padx=(20,0))
-        self.fallback_order_var = tk.StringVar(value="自動") # configから読み込むべき
-        fallback_combo = ttk.Combobox(fallback_frame, textvariable=self.fallback_order_var,
-                                     values=["自動", "品質優先", "速度優先", "コスト優先"], state="readonly")
-        fallback_combo.pack(side=tk.LEFT, padx=5)
-
+        fallback_frame_inner = customtkinter.CTkFrame(voice_frame, fg_color="transparent") # グループ化用
+        fallback_frame_inner.grid(row=2, column=0, columnspan=3, sticky="w", pady=10, padx=5)
+        customtkinter.CTkLabel(fallback_frame_inner, text="フォールバック有効:", font=self.default_font).pack(side="left")
+        self.fallback_enabled_var = tk.BooleanVar(value=True)
+        customtkinter.CTkCheckBox(fallback_frame_inner, variable=self.fallback_enabled_var, text="", font=self.default_font).pack(side="left", padx=5) # text="" for CTkCheckBox
+        customtkinter.CTkLabel(fallback_frame_inner, text="フォールバック順序:", font=self.default_font).pack(side="left", padx=(20,0))
+        self.fallback_order_var = tk.StringVar(value="自動")
+        fallback_combo = customtkinter.CTkComboBox(fallback_frame_inner, variable=self.fallback_order_var,
+                                     values=["自動", "品質優先", "速度優先", "コスト優先"], state="readonly", font=self.default_font, width=150)
+        fallback_combo.pack(side="left", padx=5)
 
         # システム設定
-        system_frame = ttk.LabelFrame(parent_frame, text="システム設定", padding="10")
-        system_frame.pack(fill=tk.X, padx=10, pady=5)
-        system_grid = ttk.Frame(system_frame)
-        system_grid.pack(fill=tk.X)
+        system_outer_frame = customtkinter.CTkFrame(parent_tab_frame)
+        system_outer_frame.pack(fill="x", padx=10, pady=5)
+        customtkinter.CTkLabel(system_outer_frame, text="システム設定", font=(self.default_font[0], self.default_font[1]+2, "bold")).pack(anchor="w", padx=10, pady=(5,0))
+        system_frame = customtkinter.CTkFrame(system_outer_frame)
+        system_frame.pack(fill="x", padx=10, pady=5)
 
         self.auto_save_var = tk.BooleanVar(value=True)
-        ttk.Checkbutton(system_grid, text="自動保存", variable=self.auto_save_var).grid(row=0, column=0, sticky=tk.W)
+        customtkinter.CTkCheckBox(system_frame, text="自動保存", variable=self.auto_save_var, font=self.default_font).grid(row=0, column=0, sticky="w", padx=5, pady=5)
         self.debug_mode_var = tk.BooleanVar()
-        ttk.Checkbutton(system_grid, text="デバッグモード", variable=self.debug_mode_var).grid(row=0, column=1, sticky=tk.W, padx=20)
-        ttk.Label(system_grid, text="会話履歴の長さ:").grid(row=1, column=0, sticky=tk.W, pady=5)
-        self.conversation_history_length_var = tk.IntVar(value=0)
-        history_spinbox = ttk.Spinbox(system_grid, from_=0, to=100, increment=1,
-                                      textvariable=self.conversation_history_length_var, width=5)
-        history_spinbox.grid(row=1, column=1, sticky=tk.W, padx=20, pady=5)
-        ttk.Label(system_grid, text="(0で履歴なし、最大100件。YouTubeライブとデバッグタブのチャットに適用)").grid(row=1, column=2, sticky=tk.W, pady=5, padx=5)
+        customtkinter.CTkCheckBox(system_frame, text="デバッグモード", variable=self.debug_mode_var, font=self.default_font).grid(row=0, column=1, sticky="w", padx=20, pady=5)
 
+        customtkinter.CTkLabel(system_frame, text="会話履歴の長さ:", font=self.default_font).grid(row=1, column=0, sticky="w", padx=5, pady=5)
+        self.conversation_history_length_var = tk.IntVar(value=0)
+        # Spinboxの代替としてCTkEntryを使用し、入力制限やバリデーションは別途必要に応じて実装
+        history_entry = customtkinter.CTkEntry(system_frame, textvariable=self.conversation_history_length_var, width=60, font=self.default_font)
+        history_entry.grid(row=1, column=1, sticky="w", padx=20, pady=5)
+        customtkinter.CTkLabel(system_frame, text="(0で履歴なし、最大100件。YouTubeライブとデバッグタブのチャットに適用)", font=self.default_font).grid(row=1, column=2, sticky="w", padx=5, pady=5)
 
         # 設定保存ボタン類
-        save_buttons_frame = ttk.Frame(parent_frame) # parent_frameに直接配置
-        save_buttons_frame.pack(fill=tk.X, padx=10, pady=20)
-        ttk.Button(save_buttons_frame, text="💾 設定を保存", command=self.save_gui_settings).pack(side=tk.LEFT, padx=5)
-        ttk.Button(save_buttons_frame, text="🔄 設定をリセット", command=self.reset_gui_settings).pack(side=tk.LEFT, padx=5)
-        ttk.Button(save_buttons_frame, text="📤 設定をエクスポート", command=self.export_gui_settings).pack(side=tk.LEFT, padx=5)
-        ttk.Button(save_buttons_frame, text="📥 設定をインポート", command=self.import_gui_settings).pack(side=tk.LEFT, padx=5)
+        save_buttons_frame = customtkinter.CTkFrame(parent_tab_frame, fg_color="transparent")
+        save_buttons_frame.pack(fill="x", padx=10, pady=20)
+        customtkinter.CTkButton(save_buttons_frame, text="💾 設定を保存", command=self.save_gui_settings, font=self.default_font).pack(side="left", padx=5)
+        customtkinter.CTkButton(save_buttons_frame, text="🔄 設定をリセット", command=self.reset_gui_settings, font=self.default_font).pack(side="left", padx=5)
+        customtkinter.CTkButton(save_buttons_frame, text="📤 設定をエクスポート", command=self.export_gui_settings, font=self.default_font).pack(side="left", padx=5)
+        customtkinter.CTkButton(save_buttons_frame, text="📥 設定をインポート", command=self.import_gui_settings, font=self.default_font).pack(side="left", padx=5)
 
 
-    def _create_advanced_features_content(self, parent_frame):
-        # パフォーマンス監視 (gui.pyでは未実装だったのでラベルのみ)
-        perf_frame = ttk.LabelFrame(parent_frame, text="パフォーマンス監視", padding="10")
-        perf_frame.pack(fill=tk.X, padx=10, pady=5)
-        ttk.Label(perf_frame, text="パフォーマンス監視機能（実装予定）").pack()
+    def _create_advanced_features_content(self, parent_tab_frame: customtkinter.CTkFrame):
+        perf_outer_frame = customtkinter.CTkFrame(parent_tab_frame)
+        perf_outer_frame.pack(fill="x", padx=10, pady=(10,5))
+        customtkinter.CTkLabel(perf_outer_frame, text="パフォーマンス監視", font=(self.default_font[0], self.default_font[1]+2, "bold")).pack(anchor="w", padx=10, pady=(5,0))
+        perf_frame = customtkinter.CTkFrame(perf_outer_frame)
+        perf_frame.pack(fill="x", padx=10, pady=5)
+        customtkinter.CTkLabel(perf_frame, text="パフォーマンス監視機能（実装予定）", font=self.default_font).pack(padx=5, pady=5)
 
-        # バックアップ・復元
-        backup_frame = ttk.LabelFrame(parent_frame, text="バックアップ・復元", padding="10")
-        backup_frame.pack(fill=tk.X, padx=10, pady=5)
-        backup_buttons = ttk.Frame(backup_frame)
-        backup_buttons.pack(fill=tk.X)
-        ttk.Button(backup_buttons, text="💾 完全バックアップ", command=self.create_full_backup).pack(side=tk.LEFT, padx=5)
-        ttk.Button(backup_buttons, text="📥 バックアップ復元", command=self.restore_backup).pack(side=tk.LEFT, padx=5)
-        # ttk.Button(backup_buttons, text="🗂️ バックアップ管理", command=self.manage_backups).pack(side=tk.LEFT, padx=5) # manage_backupsはダイアログなので、ここでは不要かも
+        backup_outer_frame = customtkinter.CTkFrame(parent_tab_frame)
+        backup_outer_frame.pack(fill="x", padx=10, pady=5)
+        customtkinter.CTkLabel(backup_outer_frame, text="バックアップ・復元", font=(self.default_font[0], self.default_font[1]+2, "bold")).pack(anchor="w", padx=10, pady=(5,0))
+        backup_frame = customtkinter.CTkFrame(backup_outer_frame)
+        backup_frame.pack(fill="x", padx=10, pady=5)
+        backup_buttons = customtkinter.CTkFrame(backup_frame, fg_color="transparent")
+        backup_buttons.pack(fill="x")
+        customtkinter.CTkButton(backup_buttons, text="💾 完全バックアップ", command=self.create_full_backup, font=self.default_font).pack(side="left", padx=5, pady=5)
+        customtkinter.CTkButton(backup_buttons, text="📥 バックアップ復元", command=self.restore_backup, font=self.default_font).pack(side="left", padx=5, pady=5)
 
-        # プラグイン管理 (gui.pyでは未実装だったのでラベルのみ)
-        plugin_frame = ttk.LabelFrame(parent_frame, text="プラグイン管理", padding="10")
-        plugin_frame.pack(fill=tk.X, padx=10, pady=5)
-        ttk.Label(plugin_frame, text="プラグイン管理機能（実装予定）").pack()
+        plugin_outer_frame = customtkinter.CTkFrame(parent_tab_frame)
+        plugin_outer_frame.pack(fill="x", padx=10, pady=5)
+        customtkinter.CTkLabel(plugin_outer_frame, text="プラグイン管理", font=(self.default_font[0], self.default_font[1]+2, "bold")).pack(anchor="w", padx=10, pady=(5,0))
+        plugin_frame = customtkinter.CTkFrame(plugin_outer_frame)
+        plugin_frame.pack(fill="x", padx=10, pady=5)
+        customtkinter.CTkLabel(plugin_frame, text="プラグイン管理機能（実装予定）", font=self.default_font).pack(padx=5, pady=5)
 
-
-    # --- 以下、AITuberMainGUIから移植・改変するメソッド群 ---
 
     def load_settings_to_gui(self):
         self.google_ai_var.set(self.config.get_system_setting("google_ai_api_key", ""))
@@ -231,24 +251,20 @@ class SettingsWindow:
                 break
         self.text_generation_model_var.set(display_name_to_set if display_name_to_set else self._get_display_text_generation_models()[0])
         self.local_llm_endpoint_url_var.set(self.config.get_system_setting("local_llm_endpoint_url", ""))
-        self._on_text_generation_model_changed() # 表示制御
+        self._on_text_generation_model_changed()
 
         ai_chat_mode = self.config.get_system_setting("ai_chat_processing_mode", "sequential")
         self.ai_chat_processing_mode_var.set("sequential (推奨)" if ai_chat_mode == "sequential" else "parallel")
 
-        self.on_system_engine_changed() # エンジン情報表示更新
-        self.populate_audio_output_devices() # これで var も設定されるはず
-        # populate_audio_output_devices内でconfigへの保存は不要、load時は読み込むだけ
+        self.on_system_engine_changed(None) # event引数なしで呼び出し
+        self.populate_audio_output_devices()
 
         self.auto_save_var.set(self.config.get_system_setting("auto_save", True))
         self.debug_mode_var.set(self.config.get_system_setting("debug_mode", False))
         self.conversation_history_length_var.set(self.config.get_system_setting("conversation_history_length", 0))
-        # フォールバック設定の読み込み
-        self.fallback_enabled_var.set(self.config.get_system_setting("fallback_enabled", True)) # 仮のキー名
-        self.fallback_order_var.set(self.config.get_system_setting("fallback_order", "自動")) # 仮のキー名
-
+        self.fallback_enabled_var.set(self.config.get_system_setting("fallback_enabled", True))
+        self.fallback_order_var.set(self.config.get_system_setting("fallback_order", "自動"))
         self.log("⚙️ 設定画面: 設定をGUIに読み込みました。")
-
 
     def save_gui_settings(self):
         try:
@@ -274,13 +290,16 @@ class SettingsWindow:
 
             self.config.set_system_setting("auto_save", self.auto_save_var.get())
             self.config.set_system_setting("debug_mode", self.debug_mode_var.get())
-            self.config.set_system_setting("conversation_history_length", self.conversation_history_length_var.get())
-            # フォールバック設定の保存
-            self.config.set_system_setting("fallback_enabled", self.fallback_enabled_var.get()) # 仮のキー名
-            self.config.set_system_setting("fallback_order", self.fallback_order_var.get()) # 仮のキー名
+            try: # IntVarが空文字列などでエラーになる可能性への対処
+                history_len = int(self.conversation_history_length_var.get())
+                self.config.set_system_setting("conversation_history_length", history_len)
+            except (ValueError, tk.TclError):
+                 self.config.set_system_setting("conversation_history_length", 0) # エラー時は0にフォールバック
 
+            self.config.set_system_setting("fallback_enabled", self.fallback_enabled_var.get())
+            self.config.set_system_setting("fallback_order", self.fallback_order_var.get())
 
-            self.config.save_config() # 明示的に保存
+            self.config.save_config()
             messagebox.showinfo("設定保存", "設定を保存しました", parent=self.root)
             self.log("💾 設定画面: 設定を保存しました。")
         except Exception as e:
@@ -288,7 +307,6 @@ class SettingsWindow:
             self.log(f"❌ 設定画面: 設定保存エラー: {e}")
 
     def _get_display_text_generation_models(self):
-        # AITuberMainGUIからコピー
         gemini_models = []
         for model_name in self.available_gemini_models:
             display_name = model_name
@@ -298,81 +316,65 @@ class SettingsWindow:
         return ["LM Studio (Local)"] + gemini_models
 
     def _get_internal_text_generation_model_name(self, display_name):
-        # AITuberMainGUIからコピー
         if display_name == "LM Studio (Local)": return "local_lm_studio"
         if display_name.endswith(" (プレビュー)"): return display_name.replace(" (プレビュー)", "")
         if display_name.endswith(" (プレビュー - クォータ注意)"): return display_name.replace(" (プレビュー - クォータ注意)", "")
         return display_name
 
-    def _on_text_generation_model_changed(self, event=None):
-        # AITuberMainGUIからコピー
+    def _on_text_generation_model_changed(self, event_or_choice=None): # event引数または選択値を直接受け取れるように
         selected_model_display_name = self.text_generation_model_var.get()
         if selected_model_display_name == "LM Studio (Local)":
-            self.local_llm_endpoint_label.grid()
-            self.local_llm_endpoint_entry.grid()
-            self.local_llm_endpoint_hint_label.grid()
+            self.local_llm_endpoint_label.grid(row=3, column=0, sticky="w", pady=5, padx=5)
+            self.local_llm_endpoint_entry.grid(row=3, column=1, padx=5, pady=5, sticky="ew")
+            self.local_llm_endpoint_hint_label.grid(row=4, column=1, sticky="w", padx=5, pady=(0,5))
         else:
             self.local_llm_endpoint_label.grid_remove()
             self.local_llm_endpoint_entry.grid_remove()
             self.local_llm_endpoint_hint_label.grid_remove()
 
     def populate_audio_output_devices(self):
-        # AITuberMainGUIからコピー
         try:
             devices = self.audio_player.get_available_output_devices()
             device_names = [device["name"] for device in devices]
-            self.audio_output_device_combo['values'] = device_names
+            # CTkComboBoxのvaluesを更新するには .configure(values=...) を使う
+            self.audio_output_device_combo.configure(values=device_names if device_names else ["利用可能なデバイスなし"])
             saved_device_id = self.config.get_system_setting("audio_output_device", "default")
-            selected_device_name = next((d["name"] for d in devices if d["id"] == saved_device_id), "デフォルト" if "デフォルト" in device_names else (device_names[0] if device_names else ""))
+            selected_device_name = next((d["name"] for d in devices if d["id"] == saved_device_id), "デフォルト" if "デフォルト" in device_names else (device_names[0] if device_names else "利用可能なデバイスなし"))
             self.audio_output_device_var.set(selected_device_name)
         except Exception as e:
             self.log(f"❌ 音声出力デバイスの読み込みに失敗: {e}")
-            self.audio_output_device_combo['values'] = ["デフォルト"]
+            self.audio_output_device_combo.configure(values=["デフォルト"])
             self.audio_output_device_var.set("デフォルト")
 
-
-    def on_system_engine_changed(self, event=None):
-        # AITuberMainGUIからコピー
+    def on_system_engine_changed(self, choice=None): # CTkComboBoxのcommandは選択値を渡す
         engine = self.voice_engine_var.get()
         info = self.voice_manager.get_engine_info(engine)
         if info:
-            self.system_engine_info.config(text=f"{info['description']} - {info['cost']}")
+            self.system_engine_info.configure(text=f"{info['description']} - {info['cost']}")
         else:
-            self.system_engine_info.config(text="エンジン情報不明")
-
+            self.system_engine_info.configure(text="エンジン情報不明")
 
     def test_google_ai_studio(self):
-        # AITuberMainGUIのものをベースに、このウィンドウ用に調整
         api_key = self.google_ai_var.get()
         if not api_key:
             messagebox.showwarning("APIキー未設定", "Google AI Studio APIキーを入力してください", parent=self.root)
             return
         self.log("🧪 Google AI Studio 接続テスト開始...")
-        # Google AI Studioの新音声合成テストを実行
         test_text = "これはGoogle AI Studioの新しい音声合成APIのテストです。"
-        # voice_model はSDKで利用する正しい形式を指定する。短い名前でも可のはず。
         threading.Thread(target=self._run_google_ai_studio_test, args=(api_key, test_text, "alloy", 1.0), daemon=True).start()
 
-
     def _run_google_ai_studio_test(self, api_key, text_to_synthesize, voice_model_short="alloy", speed=1.0):
-        # AITuberMainGUIのものをベースに、APIキーを引数で受け取る
         self.log(f"🧪 Google AI Studio 新音声合成テスト開始: Voice: {voice_model_short}, Speed: {speed}, Text: '{text_to_synthesize[:20]}...'")
         loop = None
         try:
             loop = asyncio.new_event_loop()
             asyncio.set_event_loop(loop)
-            engine = GoogleAIStudioNewVoiceAPI() # インスタンス生成
-            # voice_model はSDKが期待するフルネームである必要があるかもしれないので、短い名前からフルネームに変換
-            # もしSDKが短い名前を直接受け付けるならこの変換は不要
-            full_voice_model_name = f"models/gemini-2.5-flash-preview-tts-{voice_model_short.lower()}" # 仮
-            # GoogleAIStudioNewVoiceAPIのget_available_voices()が返す短い名前をそのまま使えるようにAPI側を改修した方が良い。
-            # ここでは、voice_model_short をそのまま渡してみる（API側が対応している前提）
+            engine = GoogleAIStudioNewVoiceAPI()
             audio_files = loop.run_until_complete(
                 engine.synthesize_speech(text_to_synthesize, voice_model_short, speed, api_key=api_key)
             )
             if audio_files:
                 self.log(f"✅ 音声ファイル生成成功: {audio_files}")
-                # audio_player は self.audio_player を使う
                 loop.run_until_complete(self.audio_player.play_audio_files(audio_files))
                 self.log("🎧 音声再生完了")
                 messagebox.showinfo("音声テスト成功", f"Google AI Studio 新音声合成 ({voice_model_short}) のテスト再生が完了しました。", parent=self.root)
@@ -385,9 +387,7 @@ class SettingsWindow:
         finally:
             if loop: loop.close()
 
-
     def test_youtube_api(self):
-        # AITuberMainGUIからコピーし、parent=self.root を追加
         api_key = self.youtube_api_var.get()
         if not api_key:
             messagebox.showwarning("APIキー未設定", "YouTube APIキーを入力してください", parent=self.root)
@@ -416,9 +416,9 @@ class SettingsWindow:
         if messagebox.askyesno("設定リセット", "本当にシステム設定を初期状態にリセットしますか？", parent=self.root):
             default_sys_settings = self.config.create_default_config().get("system_settings", {})
             for key, value in default_sys_settings.items():
-                self.config.set_system_setting(key, value) # これで個別に保存される(auto_save=Trueの場合)
-            self.config.save_config() # 明示的に全体を保存
-            self.load_settings_to_gui() # GUIに再読み込み
+                self.config.set_system_setting(key, value)
+            self.config.save_config()
+            self.load_settings_to_gui()
             self.log("🔄 設定画面: システム設定を初期状態にリセットしました。")
             messagebox.showinfo("設定リセット完了", "システム設定が初期状態にリセットされました。", parent=self.root)
 
@@ -445,24 +445,19 @@ class SettingsWindow:
         try:
             with open(file_path, "r", encoding="utf-8") as f:
                 settings = json.load(f)
-            # 読み込んだ設定をConfigManager経由で適用
             for key, value in settings.items():
-                self.config.set_system_setting(key, value) # これで個別に保存される(auto_save=Trueの場合)
-            self.config.save_config() # 明示的に全体を保存
-            self.load_settings_to_gui() # GUIに再読み込み
+                self.config.set_system_setting(key, value)
+            self.config.save_config()
+            self.load_settings_to_gui()
             messagebox.showinfo("インポート完了", f"システム設定を '{file_path}' からインポートしました", parent=self.root)
             self.log(f"📥 設定画面: システム設定をインポートしました: {file_path}")
         except Exception as e:
             messagebox.showerror("インポートエラー", f"システム設定のインポートに失敗: {e}", parent=self.root)
 
     def create_full_backup(self):
-        # AITuberMainGUIから移植。CharacterManagerとVoiceManagerのデータもバックアップに含めるかは要検討。
-        # このウィンドウ単体ではそれらのデータは直接持っていない。ConfigManagerが持つキャラクターデータは対象。
         if messagebox.askyesno("完全バックアップ", "設定ファイル全体とキャラクターデータをバックアップしますか？", parent=self.root):
             try:
-                # ConfigManagerが持つ全設定（システム設定＋キャラクター設定）をバックアップ
-                backup_data = self.config.config # ConfigManagerの内部辞書全体
-
+                backup_data = self.config.config
                 file_path = filedialog.asksaveasfilename(
                     defaultextension=".json", filetypes=[("JSONファイル", "*.json")],
                     title="完全バックアップを保存", parent=self.root
@@ -485,19 +480,12 @@ class SettingsWindow:
         try:
             with open(file_path, "r", encoding="utf-8") as f:
                 backup_data = json.load(f)
-
-            # ConfigManagerの内部データを直接置き換えるか、キーごとに設定するか。
-            # ここでは、ConfigManagerに全データをロードさせる機能があればそれを使う。なければキーごと。
-            # ConfigManager.load_config() はファイルパスから読むので、ここでは辞書を直接設定する。
             if "system_settings" in backup_data:
                  self.config.config["system_settings"] = backup_data["system_settings"]
             if "characters" in backup_data:
                  self.config.config["characters"] = backup_data["characters"]
-            # 他のトップレベルキーも同様に復元
-            # ...
-
-            self.config.save_config() # 変更を保存
-            self.load_settings_to_gui() # GUIに再読み込み
+            self.config.save_config()
+            self.load_settings_to_gui()
             self.log("🔄 設定画面: バックアップを復元しました。")
             messagebox.showinfo("復元完了", "バックアップを復元しました。", parent=self.root)
         except Exception as e:
@@ -505,9 +493,24 @@ class SettingsWindow:
 
 
 def main():
-    root = tk.Tk()
-    app = SettingsWindow(root)
-    root.mainloop()
+    # このファイルが直接実行された場合の処理 (テスト用)
+    # main.py側で設定されることを期待するが、単体テスト用にここにも記述しておく
+    customtkinter.set_appearance_mode("System") # or "Light", "Dark"
+    customtkinter.set_default_color_theme("blue") # or "green", "dark-blue"
+
+    app_root = customtkinter.CTk() # SettingsWindow のためのルートウィンドウ
+    app = SettingsWindow(app_root)
+    app_root.mainloop()
 
 if __name__ == "__main__":
-    main()
+    # launcher.py から起動されることを想定しているため、
+    # このファイルが直接実行された場合は、customtkinterの初期設定を行う。
+    customtkinter.set_appearance_mode("System")
+    customtkinter.set_default_color_theme("blue")
+
+    # SettingsWindowは通常、他のウィンドウから呼び出されるか、
+    # もしくはメインアプリケーションの一部として組み込まれる。
+    # 単体で実行する場合、独自のCTkルートを持つ。
+    root = customtkinter.CTk()
+    app = SettingsWindow(root)
+    root.mainloop()

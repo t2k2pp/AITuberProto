@@ -1,43 +1,45 @@
-import tkinter as tk
-from tkinter import ttk
+import customtkinter
 import subprocess
 import sys
 import os
-import tkinter.messagebox # メッセージボックスのインポート
+import tkinter.messagebox # メッセージボックスのインポート (customtkinterには直接の代替がないため維持)
+import tkinter as tk # subprocess起動のため (tk.Tk()を直接呼び出さないようにするため)
 
 class LauncherWindow:
-    def __init__(self, root):
+    def __init__(self, root: customtkinter.CTk): # rootの型ヒントをCTkに
         self.root = root
         self.root.title("AITuber Launcher")
-        self.root.geometry("400x450")
+        self.root.geometry("450x500") # ボタンサイズとパディングを考慮して少し拡大
 
         self.active_modules = {} # 起動中のモジュールを管理
 
-        # スタイル設定
-        style = ttk.Style()
-        style.theme_use('clam') # モダンなテーマを選択 (aqua, clam, alt, default, classicなど)
-
-        # フォント設定
-        default_font = ("Yu Gothic UI", 10) # Windowsで利用可能な日本語フォント
+        # フォント設定 (customtkinterではウィジェットごとに指定するか、CTkFontオブジェクトを使用)
+        # ここでは、各ウィジェットでタプル形式で指定する方針とする
+        # プラットフォームごとのフォント選択ロジックは維持
+        font_name = "Yu Gothic UI"
+        font_size_normal = 12
+        font_size_header = 18
         if sys.platform == "darwin": # macOS
-            default_font = ("Hiragino Sans", 12)
+            font_name = "Hiragino Sans"
+            font_size_normal = 14
+            font_size_header = 20
         elif sys.platform.startswith("linux"): # Linux
-            default_font = ("Noto Sans CJK JP", 10) # 必要に応じてインストール
+            font_name = "Noto Sans CJK JP" # 必要に応じてインストール
+            # font_size_normal と font_size_header はデフォルトのまま
 
-        style.configure("TButton", padding=6, relief="flat", font=default_font)
-        style.configure("TLabel", font=default_font)
-        style.configure("TFrame", background="#f0f0f0")
-        style.configure("Launcher.TFrame", background="#e0e0e0", borderwidth=2, relief="groove")
+        default_font_tuple = (font_name, font_size_normal)
+        header_font_tuple = (font_name, font_size_header, "bold")
 
+        # メインフレーム (CTkFrameに置き換え、paddingはCTkFrameのパラメータで調整)
+        # style="Launcher.TFrame" は削除
+        main_frame = customtkinter.CTkFrame(root, corner_radius=10) # fg_colorで背景色も指定可能
+        main_frame.pack(expand=True, fill="both", padx=20, pady=20)
 
-        main_frame = ttk.Frame(root, padding="20 20 20 20", style="Launcher.TFrame")
-        main_frame.pack(expand=True, fill=tk.BOTH)
+        header_label = customtkinter.CTkLabel(main_frame, text="AITuber 機能ランチャー", font=header_font_tuple)
+        header_label.pack(pady=(10, 25)) # パディング調整
 
-        header_label = ttk.Label(main_frame, text="AITuber 機能ランチャー", font=(default_font[0], 16, "bold"))
-        header_label.pack(pady=(0, 20))
-
-        button_frame = ttk.Frame(main_frame)
-        button_frame.pack(expand=True)
+        button_frame = customtkinter.CTkFrame(main_frame, fg_color="transparent") # ボタン用のフレームは背景色なし
+        button_frame.pack(expand=True, fill="x")
 
         buttons = [
             ("設定画面", "settings_window.py"),
@@ -49,12 +51,18 @@ class LauncherWindow:
             ("ヘルプ", "help_window.py")
         ]
 
+        button_width = 180 # CTkButtonの幅
+        button_height = 40  # CTkButtonの高さ
+
         for i, (text, module_name) in enumerate(buttons):
-            button = ttk.Button(
+            button = customtkinter.CTkButton(
                 button_frame,
                 text=text,
                 command=lambda m=module_name: self.launch_module(m),
-                width=25 # ボタンの幅を統一
+                font=default_font_tuple,
+                width=button_width,
+                height=button_height,
+                corner_radius=8
             )
             # グリッドレイアウトでボタンを配置
             row, col = divmod(i, 2) # 2列で配置
@@ -67,8 +75,6 @@ class LauncherWindow:
         self.check_active_modules() # 起動中モジュールの状態確認を開始
 
     def launch_module(self, module_name):
-        # アクティブなモジュールリストから終了したプロセスをクリーンアップ
-        # (check_active_modulesでも行われるが、起動直前にも行うことでより確実に)
         ended_modules = [m for m, p in self.active_modules.items() if p.poll() is not None]
         for m in ended_modules:
             del self.active_modules[m]
@@ -76,11 +82,11 @@ class LauncherWindow:
 
         if module_name in self.active_modules:
             process = self.active_modules[module_name]
-            if process.poll() is None: # プロセスがまだ実行中
+            if process.poll() is None:
                 print(f"{module_name} is already running.")
-                tk.messagebox.showinfo("情報", f"{module_name} は既に起動しています。")
+                tkinter.messagebox.showinfo("情報", f"{module_name} は既に起動しています。")
                 return
-            else: # プロセスは終了しているが、リストに残っていた場合 (念のため)
+            else:
                 print(f"{module_name} was in active_modules but process ended. Removing.")
                 del self.active_modules[module_name]
 
@@ -91,38 +97,43 @@ class LauncherWindow:
 
             if not os.path.exists(script_path):
                 print(f"Error: {script_path} not found.")
-                tk.messagebox.showerror("起動エラー", f"{module_name} が見つかりません。")
+                tkinter.messagebox.showerror("起動エラー", f"{module_name} が見つかりません。")
                 return
 
             process = subprocess.Popen([python_executable, script_path])
-            self.active_modules[module_name] = process # 起動したプロセスを登録
+            self.active_modules[module_name] = process
             print(f"{module_name} launched and registered.")
 
         except Exception as e:
             print(f"Error launching {module_name}: {e}")
-            tk.messagebox.showerror("起動エラー", f"{module_name} の起動中にエラーが発生しました:\n{e}")
+            tkinter.messagebox.showerror("起動エラー", f"{module_name} の起動中にエラーが発生しました:\n{e}")
 
     def check_active_modules(self):
-        """起動中のモジュールの状態を定期的に確認し、終了したものをリストから削除する"""
         ended_modules = []
         for module_name, process in self.active_modules.items():
-            if process.poll() is not None: # プロセスが終了した
+            if process.poll() is not None:
                 ended_modules.append(module_name)
                 print(f"Module {module_name} has ended (PID: {process.pid}).")
 
         for module_name in ended_modules:
-            if module_name in self.active_modules: # 二重チェック (稀なケースだが安全のため)
+            if module_name in self.active_modules:
                 del self.active_modules[module_name]
                 print(f"Removed {module_name} from active modules.")
 
-        # 次回のチェックをスケジュール (1000ms = 1秒後)
         self.root.after(1000, self.check_active_modules)
 
 
 def main():
-    root = tk.Tk()
+    # main.py で外観モードとテーマは設定済みと想定
+    # customtkinter.set_appearance_mode("System")
+    # customtkinter.set_default_color_theme("blue")
+    root = customtkinter.CTk()
     app = LauncherWindow(root)
     root.mainloop()
 
 if __name__ == "__main__":
+    # このファイルが直接実行された場合の処理
+    # main.py側で設定されることを期待するが、単体テスト用にここにも記述しておく
+    customtkinter.set_appearance_mode("System")
+    customtkinter.set_default_color_theme("blue")
     main()
