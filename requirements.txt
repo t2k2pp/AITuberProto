@@ -1,5 +1,29 @@
-customtkinter>=5.0.0 # バージョンは適宜調整
-Pillow>=9.0.0 # CTkImageなどでPillowが必要になるため、合わせて記載しておきます
-google-generativeai # ai_chat_window.py などで使われているため
-requests # settings_window.py などで使われているため
-# 他の依存関係も必要に応じてここに追加していきます (例: pydub, sounddevice など)
+# GUI Framework
+customtkinter>=5.2.2
+
+# Image Processing (dependency for customtkinter and potentially others)
+Pillow>=10.0.0
+
+# Google Generative AI (for text generation and new voice synthesis)
+# Note: This SDK (google-generativeai) is considered legacy by Google.
+# Migration to the new Google Gen AI SDK (googleapis/python-genai) is recommended for long-term support.
+# This version is specified for compatibility with the current codebase.
+# Support for this legacy SDK ends August 31st, 2025.
+google-generativeai>=0.8.5
+
+# HTTP Requests (for various API calls)
+requests>=2.32.4
+
+# Asynchronous HTTP Client/Server (for VOICEVOX, Avis Speech, Local LLM, etc.)
+aiohttp>=3.12.13
+
+# Other potential dependencies that might be needed by audio_manager or specific voice engines,
+# but are often bundled or handled by the primary libraries above.
+# Ensure these are installed if specific errors occur:
+# sounddevice (for system audio device access, often a dependency of audio playback libraries)
+# pydub (for audio manipulation, if not handled by other means)
+# PyAudio (alternative for audio I/O, sometimes needed by speech_recognition or playback libraries)
+
+# Developer/utility (not strictly required for running, but useful for development)
+# psutil (used in gui.py for system resource monitoring, consider if this feature is kept)
+# psutil>=5.9.0
