@@ -51,11 +51,11 @@ import traceback # エラー追跡用に追加
 # キャラクター管理システム v2.2（4エンジン完全対応版）
 class CharacterManager:
     """キャラクター作成・編集・管理システム v2.2（4エンジン完全対応・機能削減なし）"""
-    
+
     def __init__(self, config_manager):
         self.config = config_manager
         self.character_templates = self._load_templates()
-    
+
     def _load_templates(self):
         """キャラクターテンプレート定義 v2.2（4エンジン完全対応）"""
         return {
@@ -204,11 +204,11 @@ class CharacterManager:
                 }
             }
         }
-    
+
     def create_character(self, name, template_name=None, custom_settings=None):
         """新しいキャラクターを作成 v2.2（完全版）"""
         char_id = str(uuid.uuid4())
-        
+
         if template_name and template_name in self.character_templates:
             char_data = self.character_templates[template_name].copy() # copy() を使用してテンプレートの変更を防ぐ
             # テンプレートからロードした場合でも、不足している可能性のあるキーをデフォルトで補完
@@ -236,12 +236,12 @@ class CharacterManager:
                         char_data["response_settings"][key] = value
         else:
             char_data = self._create_blank_character()
-        
+
         char_data["name"] = name
         char_data["created_at"] = datetime.now().isoformat()
         char_data["char_id"] = char_id
         char_data["version"] = "2.2" # バージョン情報を付与
-        
+
         # カスタム設定を適用（テンプレート適用後にカスタム設定で上書き）
         if custom_settings:
             # ネストされた辞書も考慮して深くマージする (ここでは単純な update を使用)
@@ -256,10 +256,10 @@ class CharacterManager:
                 if "response_settings" not in char_data: char_data["response_settings"] = {}
                 char_data["response_settings"].update(custom_settings.pop("response_settings"))
             char_data.update(custom_settings) # 残りのトップレベルキーを更新
-        
+
         self.config.save_character(char_id, char_data)
         return char_id
-    
+
     def _create_blank_character(self):
         """空のキャラクタープレート v2.2（完全版）"""
         return {
@@ -283,17 +283,17 @@ class CharacterManager:
             }
             # char_id, created_at, version などは create_character で付与
         }
-    
+
     def get_character_prompt(self, char_id):
         """キャラクター設定からAI用プロンプトを生成 v2.2（完全版）"""
         char_data = self.config.get_character(char_id)
         if not char_data:
             return ""
-        
+
         personality = char_data.get("personality", {})
         response_settings = char_data.get("response_settings", {})
         voice_settings = char_data.get("voice_settings", {})
-        
+
         prompt = f"""
 あなたは「{char_data.get('name', '')}」という名前のAITuberです。
 
@@ -318,6 +318,18 @@ YouTubeライブ配信での短時間の応答に適した内容にしてくだ�
         """
         return prompt.strip()
 
+    def get_character(self, char_id):
+        """キャラクターIDからキャラクターデータを取得する。"""
+        return self.config.get_character(char_id)
+
     def get_all_characters(self):
         """保存されている全てのキャラクターデータを辞書として返す。"""
         return self.config.get_all_characters()
+
+    def get_character_id_by_name(self, char_name):
+        """キャラクター名からキャラクターIDを取得する。"""
+        all_chars = self.get_all_characters()
+        for char_id, char_data in all_chars.items():
+            if char_data.get("name") == char_name:
+                return char_id
+        return None
