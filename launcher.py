@@ -216,6 +216,21 @@ class LauncherWindow:
                 tkinter.messagebox.showerror("起動エラー", f"{module_name} が見つかりません。")
                 return
 
+            # --- communication_log_window.py の特別扱い ---
+            if module_name == "communication_log_window.py":
+                if self.communication_log_window is None or not self.communication_log_window.winfo_exists():
+                    self.communication_log_window = CommunicationLogWindow(self.root)
+                    # ウィンドウが閉じられたときに self.communication_log_window を None にする
+                    self.communication_log_window.protocol("WM_DELETE_WINDOW", self._on_comm_log_close)
+                    print(f"{module_name} window created.")
+                else:
+                    self.communication_log_window.deiconify() # ウィンドウを再表示
+                    self.communication_log_window.lift() # ウィンドウを前面に表示
+                    self.communication_log_window.focus_set() # フォーカスを当てる
+                    print(f"{module_name} window reactivated.")
+                return # subprocess.Popen を実行しない
+            # --- ここまで特別扱い ---
+
             process = subprocess.Popen([python_executable, script_path])
             # active_modules にプロセスとウィンドウタイトルを保存
             self.active_modules[module_name] = {"process": process, "title": window_title}
@@ -224,6 +239,13 @@ class LauncherWindow:
         except Exception as e:
             print(f"Error launching {module_name}: {e}")
             tkinter.messagebox.showerror("起動エラー", f"{module_name} の起動中にエラーが発生しました:\n{e}")
+
+    def _on_comm_log_close(self):
+        """CommunicationLogWindowが閉じられたときのコールバック"""
+        if self.communication_log_window:
+            self.communication_log_window.destroy()
+        self.communication_log_window = None
+        print("CommunicationLogWindow closed and reference reset.")
 
     def check_active_modules(self):
         ended_modules_keys = []
