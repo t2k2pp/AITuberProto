@@ -5,13 +5,17 @@ import os
 import tkinter.messagebox # メッセージボックスのインポート (customtkinterには直接の代替がないため維持)
 import tkinter as tk # subprocess起動のため (tk.Tk()を直接呼び出さないようにするため)
 
+# CommunicationLogWindowをインポート
+from communication_log_window import CommunicationLogWindow
+
 class LauncherWindow:
     def __init__(self, root: customtkinter.CTk): # rootの型ヒントをCTkに
         self.root = root
         self.root.title("AITuber Launcher")
-        self.root.geometry("450x500") # ボタンサイズとパディングを考慮して少し拡大
+        self.root.geometry("450x550") # ボタン追加のため少し拡大
 
         self.active_modules = {} # 起動中のモジュールを管理
+        self.communication_log_window = None # ログウィンドウのインスタンスを管理
 
         # フォント設定 (customtkinterではウィジェットごとに指定するか、CTkFontオブジェクトを使用)
         # ここでは、各ウィジェットでタプル形式で指定する方針とする
@@ -48,17 +52,25 @@ class LauncherWindow:
             ("YoutubeLive", "youtube_live_window.py"),
             ("AI劇場", "ai_theater_window.py"),
             ("AIチャット", "ai_chat_window.py"),
-            ("ヘルプ", "help_window.py")
+            ("ヘルプ", "help_window.py"),
+            ("通信詳細", "communication_log_window.py") # 新しいボタン情報を追加
         ]
 
         button_width = 180 # CTkButtonの幅
         button_height = 40  # CTkButtonの高さ
 
-        for i, (text, module_name) in enumerate(buttons):
+        for i, (text, module_name_or_action) in enumerate(buttons):
+            command_to_run = None
+            if module_name_or_action == "communication_log_window.py":
+                command_to_run = self.launch_communication_log_window
+            else:
+                # 既存のモジュール起動ロジック
+                command_to_run = lambda m=module_name_or_action: self.launch_module(m)
+
             button = customtkinter.CTkButton(
                 button_frame,
                 text=text,
-                command=lambda m=module_name: self.launch_module(m),
+                command=command_to_run,
                 font=default_font_tuple,
                 width=button_width,
                 height=button_height,
@@ -73,6 +85,20 @@ class LauncherWindow:
         button_frame.grid_columnconfigure(1, weight=1)
 
         self.check_active_modules() # 起動中モジュールの状態確認を開始
+
+    def launch_communication_log_window(self):
+        """通信詳細ログウィンドウを起動または表示する"""
+        if self.communication_log_window is None or not self.communication_log_window.winfo_exists():
+            self.communication_log_window = CommunicationLogWindow(self.root)
+            # self.communication_log_window.grab_set()  # モーダル表示を解除
+        else:
+            self.communication_log_window.deiconify() # 最小化されていたら表示
+            self.communication_log_window.lift() # 最前面に表示
+            self.communication_log_window.focus_set() # フォーカスを当てる
+            # 必要であればログを更新
+            if hasattr(self.communication_log_window, 'refresh_logs'):
+                self.communication_log_window.refresh_logs()
+
 
     def launch_module(self, module_name):
         ended_modules = [m for m, p in self.active_modules.items() if p.poll() is not None]

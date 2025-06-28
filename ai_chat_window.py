@@ -15,6 +15,7 @@ from character_manager import CharacterManager
 from audio_manager import VoiceEngineManager, AudioPlayer
 from google import genai
 from google.genai import types as genai_types
+from communication_logger import CommunicationLogger # 追加
 
 import logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -30,6 +31,7 @@ class AIChatWindow:
         self.character_manager = CharacterManager(self.config)
         self.voice_manager = VoiceEngineManager()
         self.audio_player = AudioPlayer(config_manager=self.config)
+        self.communication_logger = CommunicationLogger() # 追加
 
         self.ai_chat_history_folder = Path(self.config.config_file).parent / "ai_chat_history"
         try:
@@ -331,30 +333,46 @@ class AIChatWindow:
             history_str = "\n".join(chat_history_for_prompt[-10:])
             full_prompt = f"{ai_prompt}\n\n以下はこれまでの会話です:\n{history_str}\n\n{user_char_name_for_history}: {user_input_text}\n\nあなた ({ai_char_name}):"
             text_gen_model = self.config.get_system_setting("text_generation_model", "gemini-1.5-flash")
-            ai_response_text = "エラー：応答取得失敗"
+            ai_response_text = "エラー：応答取得失敗" # デフォルトのエラーメッセージ
+
+            # ログ記録: AIへのリクエスト
+            self.communication_logger.add_log("sent", "text_generation", f"[AI Chat to {ai_char_name} (Model: {text_gen_model})]\n{full_prompt}")
 
             if text_gen_model == "local_lm_studio":
                 local_llm_url = self.config.get_system_setting("local_llm_endpoint_url")
-                if not local_llm_url: ai_response_text = "ローカルLLMエンドポイントURL未設定"
+                if not local_llm_url:
+                    ai_response_text = "ローカルLLMエンドポイントURL未設定"
                 else:
                     loop = asyncio.new_event_loop(); asyncio.set_event_loop(loop)
-                    try: ai_response_text = loop.run_until_complete(self._generate_response_local_llm_chat(full_prompt, local_llm_url, ai_char_name))
-                    finally: loop.close()
+                    try:
+                        ai_response_text = loop.run_until_complete(self._generate_response_local_llm_chat(full_prompt, local_llm_url, ai_char_name))
+                    finally:
+                        loop.close()
             else:
                 gemini_response = client.models.generate_content(model=text_gen_model, contents=full_prompt,
                                                                generation_config=genai_types.GenerateContentConfig(temperature=0.8, max_output_tokens=200))
                 ai_response_text = gemini_response.text.strip() if gemini_response.text else "うーん、ちょっとうまく答えられないみたいです。"
 
+            # ログ記録: AIからのレスポンス
+            self.communication_logger.add_log("received", "text_generation", f"[AI Chat from {ai_char_name} (Model: {text_gen_model})]\n{ai_response_text}")
+
             self.root.after(0, self._add_message_to_chat_display_tree, f"🤖 {ai_char_name}", ai_response_text)
             self._append_to_current_chat_csv('talk', ai_char_name, ai_response_text)
-            self._play_character_speech_async(ai_char_name, ai_response_text)
-        except genai_types.BlockedPromptException:
-            self.root.after(0, self._add_message_to_chat_display_tree, f"🤖 {ai_char_name}", "その内容についてはお答えできません。")
+            self._play_character_speech_async(ai_char_name, ai_response_text) # この中で音声合成ログが記録される
+
+        except genai_types.BlockedPromptException as e_block:
+            ai_response_text = "その内容についてはお答えできません。"
+            self.communication_logger.add_log("received", "text_generation", f"[AI Chat from {ai_char_name} (Model: {text_gen_model}) - Blocked]\n{str(e_block)}")
+            self.root.after(0, self._add_message_to_chat_display_tree, f"🤖 {ai_char_name}", ai_response_text)
         except Exception as e_gen:
+            ai_response_text = "ごめんなさい、ちょっと調子が悪いです。" # エラー時のレスポンスを更新
             self.log(f"AI応答生成エラー: {e_gen}")
-            self.root.after(0, self._add_message_to_chat_display_tree, f"🤖 {ai_char_name}", "ごめんなさい、ちょっと調子が悪いです。")
+            self.communication_logger.add_log("received", "text_generation", f"[AI Chat from {ai_char_name} (Model: {text_gen_model}) - Error]\n{str(e_gen)}")
+            self.root.after(0, self._add_message_to_chat_display_tree, f"🤖 {ai_char_name}", ai_response_text)
+
 
     async def _generate_response_local_llm_chat(self, prompt_text: str, endpoint_url: str, char_name: str) -> str:
+        # このメソッド内での個別ロギングは呼び出し元に任せる
         try:
             import aiohttp # aiohttpのimportを確認
             payload = {"model": "local-model", "messages": [{"role": "user", "content": prompt_text}], "temperature": 0.7, "max_tokens": 200}
@@ -381,6 +399,9 @@ class AIChatWindow:
         model = voice_settings.get('model')
         speed = voice_settings.get('speed', 1.0)
         api_key = self.config.get_system_setting("google_ai_api_key") if "google_ai_studio" in engine else None
+
+        # ログ記録: 音声合成リクエスト
+        self.communication_logger.add_log("sent", "voice_synthesis", f"[AI Chat Voice for {char_name} (Engine: {engine}, Model: {model})]\n{text}")
 
         def run_synthesis_and_play():
             loop = asyncio.new_event_loop(); asyncio.set_event_loop(loop)
