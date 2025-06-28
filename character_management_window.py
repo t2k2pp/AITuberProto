@@ -59,6 +59,7 @@ class CharacterEditDialog:
 
 
     def create_widgets(self, dialog_frame: customtkinter.CTkFrame): # 引数に親フレームを受け取る
+        # CharacterEditDialog のウィジェット作成は変更なし
         # キャラクター名
         customtkinter.CTkLabel(dialog_frame, text="キャラクター名:", font=self.label_font).pack(anchor="w", padx=10, pady=(10,2))
         self.name_var = tk.StringVar()
@@ -401,10 +402,21 @@ class CharacterEditDialog:
             messagebox.showerror("エラー", f"キャラクターの{action_str}に失敗: {e}", parent=self.dialog)
 
 class CharacterManagementWindow:
-    def __init__(self, root: customtkinter.CTk): # rootの型ヒント
+    def __init__(self, root: customtkinter.CTk):
         self.root = root
         self.root.title("キャラクター管理")
-        self.root.geometry("950x750") # 少し調整
+        self.root.geometry("950x750")
+
+        self.loading_label = customtkinter.CTkLabel(self.root, text="読み込み中...", font=("Yu Gothic UI", 18))
+        self.loading_label.pack(expand=True, fill="both")
+        self.root.update_idletasks()
+
+        self.root.after(50, self._initialize_components)
+
+    def _initialize_components(self):
+        if hasattr(self, 'loading_label') and self.loading_label.winfo_exists():
+            self.loading_label.pack_forget()
+            self.loading_label.destroy()
 
         self.config_manager = ConfigManager()
         self.character_manager = CharacterManager(self.config_manager)
@@ -416,11 +428,13 @@ class CharacterManagementWindow:
         self.label_font = (self.default_font[0], self.default_font[1] + 1, "bold")
         self.treeview_font = (self.default_font[0], self.default_font[1] -1)
 
-
         self.create_widgets()
         self.refresh_character_list_display()
+        self.log("キャラクター管理ウィンドウが初期化されました。")
+
 
     def log(self, message):
+        # CharacterManagementWindow の log メソッドはUIウィジェットに書き込まない
         logger.info(message)
 
     def create_widgets(self):

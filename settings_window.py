@@ -39,7 +39,18 @@ class SettingsWindow:
         # launcherから呼び出されるので、self.rootは実質的に新しいCTk()インスタンスとなる。
 
         self.root.title("設定画面")
-        self.root.geometry("850x800") # レイアウト調整のため少し拡大
+        self.root.geometry("850x800")
+
+        self.loading_label = customtkinter.CTkLabel(self.root, text="読み込み中...", font=("Yu Gothic UI", 18))
+        self.loading_label.pack(expand=True, fill="both")
+        self.root.update_idletasks()
+
+        self.root.after(50, self._initialize_components)
+
+    def _initialize_components(self):
+        if hasattr(self, 'loading_label') and self.loading_label.winfo_exists():
+            self.loading_label.pack_forget()
+            self.loading_label.destroy()
 
         self.config = ConfigManager()
         self.voice_manager = VoiceEngineManager()
@@ -67,17 +78,27 @@ class SettingsWindow:
         if sys.platform == "darwin": self.default_font = ("Hiragino Sans", 14)
         elif sys.platform.startswith("linux"): self.default_font = ("Noto Sans CJK JP", 12)
 
-
         self.create_widgets()
         self.load_settings_to_gui()
+        # self.log("設定ウィンドウが初期化されました。") # load_settings_to_gui の最後に移動済み
 
     def log(self, message):
         logger.info(message)
+        # SettingsWindow の log メソッドは self.log_text_widget を使用するが、
+        # このウィジェットは _create_advanced_features_content の中で作成される（またはされない）。
+        # 現状のコードでは log_text_widget はオプション扱いなので、
+        # _initialize_components の最後でログを出すようにする。
+        # ただし、load_settings_to_gui の最後にログがあるので、ここでは不要。
         if self.log_text_widget and isinstance(self.log_text_widget, customtkinter.CTkTextbox):
             timestamp = datetime.now().strftime("%H:%M:%S")
             log_message = f"[{timestamp}] {message}\n"
-            self.log_text_widget.insert(tk.END, log_message)
-            self.log_text_widget.see(tk.END)
+            try:
+                self.log_text_widget.insert("end", log_message) # tk.END -> "end"
+                self.log_text_widget.see("end") # tk.END -> "end"
+            except tk.TclError: # ウィンドウ破棄後など
+                pass
+            except AttributeError: # ウィジェットがまだない場合
+                 logger.warning(f"Log widget not available for: {message}")
 
     def create_widgets(self):
         # ttk.Notebook -> CTkTabview

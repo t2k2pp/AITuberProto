@@ -2,16 +2,18 @@ import customtkinter
 import subprocess
 import sys
 import os
-import tkinter.messagebox # メッセージボックスのインポート (customtkinterには直接の代替がないため維持)
-import tkinter as tk # subprocess起動のため (tk.Tk()を直接呼び出さないようにするため)
+import tkinter.messagebox
+import tkinter as tk
+import pygetwindow # 追加
+import time # 追加
 
 class LauncherWindow:
-    def __init__(self, root: customtkinter.CTk): # rootの型ヒントをCTkに
+    def __init__(self, root: customtkinter.CTk):
         self.root = root
         self.root.title("AITuber Launcher")
-        self.root.geometry("450x500") # ボタンサイズとパディングを考慮して少し拡大
+        self.root.geometry("450x500")
 
-        self.active_modules = {} # 起動中のモジュールを管理
+        self.active_modules = {} # 起動中のモジュールを管理 (変更: pid と title を保存)
 
         # フォント設定 (customtkinterではウィジェットごとに指定するか、CTkFontオブジェクトを使用)
         # ここでは、各ウィジェットでタプル形式で指定する方針とする
@@ -36,55 +38,137 @@ class LauncherWindow:
         main_frame.pack(expand=True, fill="both", padx=20, pady=20)
 
         header_label = customtkinter.CTkLabel(main_frame, text="AITuber 機能ランチャー", font=header_font_tuple)
-        header_label.pack(pady=(10, 25)) # パディング調整
+        header_label.pack(pady=(10, 25))
 
-        button_frame = customtkinter.CTkFrame(main_frame, fg_color="transparent") # ボタン用のフレームは背景色なし
-        button_frame.pack(expand=True, fill="x")
-
-        buttons = [
-            ("設定画面", "settings_window.py"),
-            ("キャラクター管理", "character_management_window.py"),
-            ("デバッグ", "debug_window.py"),
-            ("YoutubeLive", "youtube_live_window.py"),
-            ("AI劇場", "ai_theater_window.py"),
-            ("AIチャット", "ai_chat_window.py"),
-            ("ヘルプ", "help_window.py")
+        # メイン機能とサブ機能のボタン設定を分離
+        main_features_config = [
+            {"text": "YoutubeLive", "module_name": "youtube_live_window.py", "title": "YouTube Live 配信"},
+            {"text": "AI劇場", "module_name": "ai_theater_window.py", "title": "AI劇場"},
+            {"text": "AIチャット", "module_name": "ai_chat_window.py", "title": "AIチャット"},
+            {"text": "キャラクター管理", "module_name": "character_management_window.py", "title": "キャラクター管理"},
         ]
 
-        button_width = 180 # CTkButtonの幅
-        button_height = 40  # CTkButtonの高さ
+        sub_features_config = [
+            {"text": "設定画面", "module_name": "settings_window.py", "title": "設定画面"},
+            {"text": "デバッグ", "module_name": "debug_window.py", "title": "デバッグ・テスト画面"},
+            {"text": "ヘルプ", "module_name": "help_window.py", "title": "ヘルプ"}
+        ]
 
-        for i, (text, module_name) in enumerate(buttons):
+        button_width = 180  # CTkButtonの幅
+        button_height = 40 # CTkButtonの高さ
+
+        # メイン機能ボタン用フレーム
+        main_button_outer_frame = customtkinter.CTkFrame(main_frame, fg_color="transparent")
+        main_button_outer_frame.pack(pady=(10, 5), fill="x", expand=False) # 上部に配置、余白調整
+        customtkinter.CTkLabel(main_button_outer_frame, text="メイン機能", font=(default_font_tuple[0], default_font_tuple[1], "bold")).pack(anchor="w", padx=10)
+        main_button_frame = customtkinter.CTkFrame(main_button_outer_frame, fg_color="transparent")
+        main_button_frame.pack(fill="x")
+
+
+        for i, btn_config in enumerate(main_features_config):
             button = customtkinter.CTkButton(
-                button_frame,
-                text=text,
-                command=lambda m=module_name: self.launch_module(m),
+                main_button_frame, # 親フレームを main_button_frame に変更
+                text=btn_config["text"],
+                command=lambda m=btn_config["module_name"], t=btn_config["title"]: self.launch_module(m, t),
                 font=default_font_tuple,
                 width=button_width,
                 height=button_height,
                 corner_radius=8
             )
-            # グリッドレイアウトでボタンを配置
-            row, col = divmod(i, 2) # 2列で配置
-            button.grid(row=row, column=col, padx=10, pady=10, sticky="ew")
+            row, col = divmod(i, 2)
+            main_button_frame.grid_columnconfigure(col, weight=1) # 各列のウェイト設定
+            button.grid(row=row, column=col, padx=10, pady=5, sticky="ew")
 
-        # グリッドの列幅を均等に設定
-        button_frame.grid_columnconfigure(0, weight=1)
-        button_frame.grid_columnconfigure(1, weight=1)
 
-        self.check_active_modules() # 起動中モジュールの状態確認を開始
+        # サブ機能ボタン用フレーム
+        sub_button_outer_frame = customtkinter.CTkFrame(main_frame, fg_color="transparent")
+        # サブ機能フレームをメインフレームの下部に配置するために、
+        # メイン機能フレームとサブ機能フレームの間にスペーサーを挟むか、
+        # main_frame の pack expand をうまく使う必要がある。
+        # ここでは、サブ機能フレームを main_frame の下部に配置するために side=tk.BOTTOM を使う
+        sub_button_outer_frame.pack(pady=(10, 20), fill="x", expand=False, side="bottom") # 下部に配置, pady調整
+        customtkinter.CTkLabel(sub_button_outer_frame, text="サブ機能", font=(default_font_tuple[0], default_font_tuple[1], "bold")).pack(anchor="w", padx=10)
+        sub_button_frame = customtkinter.CTkFrame(sub_button_outer_frame, fg_color="transparent")
+        sub_button_frame.pack(fill="x")
 
-    def launch_module(self, module_name):
-        ended_modules = [m for m, p in self.active_modules.items() if p.poll() is not None]
-        for m in ended_modules:
-            del self.active_modules[m]
-            print(f"Cleaned up ended module: {m}")
+        for i, btn_config in enumerate(sub_features_config):
+            button = customtkinter.CTkButton(
+                sub_button_frame, # 親フレームを sub_button_frame に変更
+                text=btn_config["text"],
+                command=lambda m=btn_config["module_name"], t=btn_config["title"]: self.launch_module(m, t),
+                font=default_font_tuple,
+                width=button_width,
+                height=button_height,
+                corner_radius=8
+            )
+            row, col = divmod(i, 2)
+            sub_button_frame.grid_columnconfigure(col, weight=1) # 各列のウェイト設定
+            button.grid(row=row, column=col, padx=10, pady=5, sticky="ew")
+
+        exit_button_frame = customtkinter.CTkFrame(main_frame, fg_color="transparent")
+        exit_button_frame.pack(pady=(10,10), fill="x", side="bottom") # pady調整
+
+        self.exit_button = customtkinter.CTkButton(
+            exit_button_frame,
+            text="ランチャー終了",
+            command=self.on_launcher_close,
+            font=default_font_tuple,
+            fg_color="tomato",
+            hover_color="darkred",
+            width=150 # ボタン幅を少し指定
+        )
+        # ボタンを右寄せにする
+        self.exit_button.pack(side="right", padx=10, pady=10) # side="right" と padx を追加
+
+        self.check_active_modules()
+
+    def on_launcher_close(self):
+        if tkinter.messagebox.askyesno("終了確認", "起動中のすべての機能を終了し、ランチャーを閉じますか？", parent=self.root):
+            print("Launcher closing. Terminating active modules...")
+            active_processes_terminated = 0
+            # イテレート中に変更する可能性があるのでリストのコピーを取る
+            for module_name, data in list(self.active_modules.items()):
+                process = data["process"]
+                if process.poll() is None: # プロセスがまだ実行中の場合
+                    try:
+                        process.terminate() # SIGTERMを送信
+                        print(f"Terminating {module_name} (PID: {process.pid})...")
+                        active_processes_terminated +=1
+                    except Exception as e:
+                        print(f"Error terminating {module_name}: {e}")
+
+            if active_processes_terminated > 0:
+                print(f"Waiting for {active_processes_terminated} processes to terminate...")
+                time.sleep(0.5) # 0.5秒待機
+
+            print("Exiting launcher.")
+            self.root.destroy()
+
+    def launch_module(self, module_name, window_title):
+        # 既存のプロセスをクリーンアップ
+        ended_modules_keys = [key for key, data in self.active_modules.items() if data["process"].poll() is not None]
+        for key in ended_modules_keys:
+            del self.active_modules[key]
+            print(f"Cleaned up ended module: {key}")
 
         if module_name in self.active_modules:
-            process = self.active_modules[module_name]
-            if process.poll() is None:
+            process_data = self.active_modules[module_name]
+            if process_data["process"].poll() is None:
                 print(f"{module_name} is already running.")
-                tkinter.messagebox.showinfo("情報", f"{module_name} は既に起動しています。")
+                try:
+                    # ウィンドウタイトルでウィンドウを検索してアクティブ化
+                    target_window = pygetwindow.getWindowsWithTitle(window_title)
+                    if target_window:
+                        win = target_window[0]
+                        if win.isMinimized:
+                            win.restore()
+                        win.activate()
+                        print(f"Activated window: {window_title}")
+                    else:
+                        tkinter.messagebox.showinfo("情報", f"{window_title} は起動中ですが、ウィンドウが見つかりませんでした。")
+                except Exception as e:
+                    print(f"Error activating window {window_title}: {e}")
+                    tkinter.messagebox.showinfo("情報", f"{module_name} は既に起動しています。\nウィンドウの操作に失敗しました: {e}")
                 return
             else:
                 print(f"{module_name} was in active_modules but process ended. Removing.")
@@ -101,21 +185,22 @@ class LauncherWindow:
                 return
 
             process = subprocess.Popen([python_executable, script_path])
-            self.active_modules[module_name] = process
-            print(f"{module_name} launched and registered.")
+            # active_modules にプロセスとウィンドウタイトルを保存
+            self.active_modules[module_name] = {"process": process, "title": window_title}
+            print(f"{module_name} launched and registered with title '{window_title}'.")
 
         except Exception as e:
             print(f"Error launching {module_name}: {e}")
             tkinter.messagebox.showerror("起動エラー", f"{module_name} の起動中にエラーが発生しました:\n{e}")
 
     def check_active_modules(self):
-        ended_modules = []
-        for module_name, process in self.active_modules.items():
-            if process.poll() is not None:
-                ended_modules.append(module_name)
-                print(f"Module {module_name} has ended (PID: {process.pid}).")
+        ended_modules_keys = []
+        for module_name, data in self.active_modules.items(): # active_modules の構造変更に対応
+            if data["process"].poll() is not None: # data["process"] を参照
+                ended_modules_keys.append(module_name)
+                print(f"Module {module_name} has ended (PID: {data['process'].pid}).")
 
-        for module_name in ended_modules:
+        for module_name in ended_modules_keys:
             if module_name in self.active_modules:
                 del self.active_modules[module_name]
                 print(f"Removed {module_name} from active modules.")
