@@ -55,8 +55,8 @@ class LauncherWindow:
         sub_features_config = [
             {"text": "設定画面", "module_name": "settings_window.py", "title": "設定画面"},
             {"text": "デバッグ", "module_name": "debug_window.py", "title": "デバッグ・テスト画面"},
-            {"text": "ヘルプ", "module_name": "help_window.py", "title": "ヘルプ"}
-            ("text": "通信詳細", "module_name": "communication_log_window.py", "title":"通信詳細") # 新しいボタン情報を追加
+            {"text": "ヘルプ", "module_name": "help_window.py", "title": "ヘルプ"},
+            {"text": "通信詳細", "module_name": "communication_log_window.py", "title":"通信詳細"} # 新しいボタン情報を追加
         ]
 
         button_width = 180  # CTkButtonの幅
