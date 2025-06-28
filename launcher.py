@@ -7,20 +7,47 @@ import tkinter as tk
 import pygetwindow # 追加
 import time # 追加
 
-# CommunicationLogWindowをインポート
+# CommunicationLogWindow と CommunicationLogger をインポート
 from communication_log_window import CommunicationLogWindow
+from communication_logger import CommunicationLogger
 
 class LauncherWindow:
     def __init__(self, root: customtkinter.CTk):
         self.root = root
         self.root.title("AITuber Launcher")
-        self.root.geometry("450x550") # ボタン追加のため少し拡大
+        self.root.geometry("450x550")
 
-        self.active_modules = {} # 起動中のモジュールを管理
-        self.communication_log_window = None # ログウィンドウのインスタンスを管理
+        # --- CommunicationLoggerの初期化と環境変数設定 ---
+        # ランチャーが最初にロガーを初期化し、パスを決定する
+        # log_dir は CommunicationLogger のデフォルト値 "communication_logs" を使用する
+        # もしランチャーで特定のログディレクトリを指定したい場合は、ここで指定する
+        # 例: logger = CommunicationLogger(log_dir="launcher_defined_logs")
+        logger = CommunicationLogger()
+        session_log_path = logger.get_session_log_filepath()
+        log_dir_path = CommunicationLogger._log_dir # クラス変数から取得 (getterがあればそれが望ましい)
 
-        # フォント設定 (customtkinterではウィジェットごとに指定するか、CTkFontオブジェクトを使用)
-        # ここでは、各ウィジェットでタプル形式で指定する方針とする
+        if session_log_path:
+            os.environ['GLOBAL_SESSION_LOG_PATH'] = os.path.abspath(session_log_path)
+            print(f"Launcher: Set GLOBAL_SESSION_LOG_PATH = {os.environ['GLOBAL_SESSION_LOG_PATH']}")
+        else:
+            print("Launcher: Error: Could not get session log path from CommunicationLogger.")
+            # エラー処理: 環境変数が設定できない場合、サブプロセスでのログ記録が期待通りに動作しない可能性
+            # ここでアプリケーションを終了させるか、警告を出すかなどの判断が必要
+            # 今回は警告のみとする
+            tkinter.messagebox.showwarning("ロガー初期化エラー", "セッションログパスの取得に失敗しました。\nサブプロセスのログが正しく記録されない可能性があります。")
+
+        if log_dir_path:
+            os.environ['GLOBAL_LOG_DIR_PATH'] = os.path.abspath(log_dir_path)
+            print(f"Launcher: Set GLOBAL_LOG_DIR_PATH = {os.environ['GLOBAL_LOG_DIR_PATH']}")
+        else:
+            print("Launcher: Error: Could not get log directory path from CommunicationLogger.")
+            tkinter.messagebox.showwarning("ロガー初期化エラー", "ログディレクトリパスの取得に失敗しました。\nサブプロセスのログが正しく記録されない可能性があります。")
+        # --- ここまで追加 ---
+
+        self.active_modules = {}
+        self.communication_log_window = None
+
+        # フォント設定
         # プラットフォームごとのフォント選択ロジックは維持
         font_name = "Yu Gothic UI"
         font_size_normal = 12
