@@ -7,13 +7,17 @@ import tkinter as tk
 import pygetwindow # 追加
 import time # 追加
 
+# CommunicationLogWindowをインポート
+from communication_log_window import CommunicationLogWindow
+
 class LauncherWindow:
     def __init__(self, root: customtkinter.CTk):
         self.root = root
         self.root.title("AITuber Launcher")
-        self.root.geometry("450x500")
+        self.root.geometry("450x550") # ボタン追加のため少し拡大
 
-        self.active_modules = {} # 起動中のモジュールを管理 (変更: pid と title を保存)
+        self.active_modules = {} # 起動中のモジュールを管理
+        self.communication_log_window = None # ログウィンドウのインスタンスを管理
 
         # フォント設定 (customtkinterではウィジェットごとに指定するか、CTkFontオブジェクトを使用)
         # ここでは、各ウィジェットでタプル形式で指定する方針とする
@@ -52,6 +56,7 @@ class LauncherWindow:
             {"text": "設定画面", "module_name": "settings_window.py", "title": "設定画面"},
             {"text": "デバッグ", "module_name": "debug_window.py", "title": "デバッグ・テスト画面"},
             {"text": "ヘルプ", "module_name": "help_window.py", "title": "ヘルプ"}
+            ("text": "通信詳細", "module_name": "communication_log_window.py", "title":"通信詳細") # 新しいボタン情報を追加
         ]
 
         button_width = 180  # CTkButtonの幅
