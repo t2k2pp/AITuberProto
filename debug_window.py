@@ -25,7 +25,18 @@ class DebugWindow:
     def __init__(self, root: customtkinter.CTk):
         self.root = root
         self.root.title("デバッグ・テスト画面")
-        self.root.geometry("950x800") # サイズ調整
+        self.root.geometry("950x800")
+
+        self.loading_label = customtkinter.CTkLabel(self.root, text="読み込み中...", font=("Yu Gothic UI", 18))
+        self.loading_label.pack(expand=True, fill="both")
+        self.root.update_idletasks()
+
+        self.root.after(50, self._initialize_components)
+
+    def _initialize_components(self):
+        if hasattr(self, 'loading_label') and self.loading_label.winfo_exists():
+            self.loading_label.pack_forget()
+            self.loading_label.destroy()
 
         self.config = ConfigManager()
         self.character_manager = CharacterManager(self.config)
@@ -48,6 +59,7 @@ class DebugWindow:
         ]
         self.load_settings_for_debug_window() # ここでソートも行われる
         self.create_widgets()
+        self.log("デバッグウィンドウが初期化されました。")
 
 
     def log(self, message):
@@ -58,7 +70,12 @@ class DebugWindow:
                 self.debug_chat_display_text.insert("end", f"[LOG] {message}\n")
                 self.debug_chat_display_text.see("end")
                 self.debug_chat_display_text.configure(state="disabled")
-            except: pass
+            except tk.TclError: # ウィンドウ破棄後など
+                pass
+            except AttributeError: # ウィジェットがまだない場合
+                 logger.warning(f"Log widget not available for: {message}")
+            except Exception: # その他の予期せぬエラー
+                pass
 
 
     def load_settings_for_debug_window(self):

@@ -20,8 +20,23 @@ class YouTubeLiveWindow:
     def __init__(self, root: customtkinter.CTk):
         self.root = root
         self.root.title("YouTube Live 配信")
-        self.root.geometry("950x750") # サイズ調整
+        self.root.geometry("950x750") # 先にウィンドウサイズを設定
 
+        # 仮のローディング表示
+        self.loading_label = customtkinter.CTkLabel(self.root, text="読み込み中...", font=("Yu Gothic UI", 18))
+        self.loading_label.pack(expand=True, fill="both")
+        self.root.update_idletasks() # ウィンドウとラベルを即時描画
+
+        # 時間のかかる処理を after で遅延させる
+        self.root.after(50, self._initialize_components) # 50ms 遅延
+
+    def _initialize_components(self):
+        # ローディング表示を削除
+        if hasattr(self, 'loading_label') and self.loading_label.winfo_exists():
+            self.loading_label.pack_forget()
+            self.loading_label.destroy()
+
+        # 本来の初期化処理
         self.config = ConfigManager()
         self.character_manager = CharacterManager(self.config)
         self.voice_manager = VoiceEngineManager()
@@ -37,10 +52,10 @@ class YouTubeLiveWindow:
         elif sys.platform.startswith("linux"): self.default_font = ("Noto Sans CJK JP", 12)
         self.label_font = (self.default_font[0], self.default_font[1] + 1, "bold")
 
-
         self.create_widgets()
         self.load_settings_for_youtube_live()
         self.root.protocol("WM_DELETE_WINDOW", self.on_closing)
+        self.log("YouTube Live ウィンドウ: 初期化完了。")
 
     def log(self, message, to_widget=True):
         timestamp = datetime.now().strftime("%H:%M:%S")
