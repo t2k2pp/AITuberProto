@@ -23,7 +23,18 @@ class AITheaterWindow:
     def __init__(self, root: customtkinter.CTk):
         self.root = root
         self.root.title("AI劇場")
-        self.root.geometry("1050x850") # サイズ調整
+        self.root.geometry("1050x850")
+
+        self.loading_label = customtkinter.CTkLabel(self.root, text="読み込み中...", font=("Yu Gothic UI", 18))
+        self.loading_label.pack(expand=True, fill="both")
+        self.root.update_idletasks()
+
+        self.root.after(50, self._initialize_components)
+
+    def _initialize_components(self):
+        if hasattr(self, 'loading_label') and self.loading_label.winfo_exists():
+            self.loading_label.pack_forget()
+            self.loading_label.destroy()
 
         self.config_manager = ConfigManager()
         self.character_manager = CharacterManager(self.config_manager)
@@ -43,13 +54,14 @@ class AITheaterWindow:
         self.label_font = (self.default_font[0], self.default_font[1] + 1, "bold")
         self.treeview_font = (self.default_font[0], self.default_font[1] -1)
 
-
         self.create_widgets()
         self.populate_talker_dropdown()
         self.log("AI劇場ウィンドウが初期化されました。")
         self.root.protocol("WM_DELETE_WINDOW", self.on_closing)
 
     def log(self, message):
+        # AITheaterWindow の log メソッドはUIウィジェットに書き込まないため、
+        # 呼び出しタイミングに特に注意は不要。
         logger.info(message)
 
     def on_closing(self):

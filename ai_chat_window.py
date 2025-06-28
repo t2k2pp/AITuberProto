@@ -24,7 +24,18 @@ class AIChatWindow:
     def __init__(self, root: customtkinter.CTk):
         self.root = root
         self.root.title("AIチャット")
-        self.root.geometry("1000x750") # サイズ調整
+        self.root.geometry("1000x750")
+
+        self.loading_label = customtkinter.CTkLabel(self.root, text="読み込み中...", font=("Yu Gothic UI", 18))
+        self.loading_label.pack(expand=True, fill="both")
+        self.root.update_idletasks()
+
+        self.root.after(50, self._initialize_components)
+
+    def _initialize_components(self):
+        if hasattr(self, 'loading_label') and self.loading_label.winfo_exists():
+            self.loading_label.pack_forget()
+            self.loading_label.destroy()
 
         self.config = ConfigManager()
         self.character_manager = CharacterManager(self.config)
@@ -36,7 +47,8 @@ class AIChatWindow:
             self.ai_chat_history_folder.mkdir(parents=True, exist_ok=True)
         except Exception as e:
             logger.error(f"AIチャット履歴フォルダの作成失敗: {e}")
-            messagebox.showerror("フォルダ作成エラー", f"AIチャット履歴フォルダ作成失敗: {e}", parent=self.root)
+            # messagebox は _initialize_components 内で表示する方が安全
+            # messagebox.showerror("フォルダ作成エラー", f"AIチャット履歴フォルダ作成失敗: {e}", parent=self.root)
 
         self.current_ai_chat_file_path = None
 
@@ -51,8 +63,14 @@ class AIChatWindow:
         self.load_chat_history_list()
         self.root.protocol("WM_DELETE_WINDOW", self.on_closing)
         self.log("AIチャットウィンドウが初期化されました。")
+        # エラー発生時のメッセージボックス表示 (もしあれば)
+        if not self.ai_chat_history_folder.exists():
+             messagebox.showerror("フォルダ作成エラー", f"AIチャット履歴フォルダ作成に失敗しました。\nパス: {self.ai_chat_history_folder}", parent=self.root)
+
 
     def log(self, message):
+        # AIChatWindow の log メソッドはUIウィジェットに書き込まないため、
+        # 呼び出しタイミングに特に注意は不要。
         logger.info(message)
 
     def on_closing(self):

@@ -25,10 +25,22 @@ class HelpWindow:
         self.filtered_voice_model_data: list[dict] = [] # フィルタ/検索後のデータ
         self.current_selected_model_index = None # model_list_frame内のリストでの選択インデックス
 
+        self.loading_label = customtkinter.CTkLabel(self.root, text="読み込み中...", font=("Yu Gothic UI", 18))
+        self.loading_label.pack(expand=True, fill="both")
+        self.root.update_idletasks()
+
+        self.root.after(50, self._initialize_components)
+
+    def _initialize_components(self):
+        if hasattr(self, 'loading_label') and self.loading_label.winfo_exists():
+            self.loading_label.pack_forget()
+            self.loading_label.destroy()
+
         self.load_voice_models_data() # JSONデータ読み込み
         self.create_widgets()
         self.populate_engine_filter()
         self._update_model_list()
+        # HelpWindow には log メソッドがないため、ここでログ出力はなし
 
     def load_voice_models_data(self):
         """
