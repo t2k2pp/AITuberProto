@@ -106,46 +106,14 @@ class CommunicationLogWindow(customtkinter.CTkToplevel):
             tk.messagebox.showwarning("クリア中止", "入力が「はい」と一致しなかったため、メモリ上のログはクリアされませんでした。", parent=self)
 
     def on_closing(self):
-        self.destroy()
-
-if __name__ == '__main__':
-    app = customtkinter.CTk()
-    customtkinter.set_appearance_mode("System")
-    customtkinter.set_default_color_theme("blue")
-    app.title("Test App for Communication Log")
-    # app.geometry("400x300") # Window自体のサイズはWindowクラスで設定
-
-    # テスト用のログディレクトリとファイルを作成
-    test_log_dir = "test_comm_log_window_logs"
-    if not os.path.exists(test_log_dir):
-        os.makedirs(test_log_dir)
-
-    # CommunicationLogger のインスタンスを作成し、テスト用ディレクトリを指定
-    # これにより、セッションログファイルが test_log_dir 内に作成される
-    logger_instance = CommunicationLogger(log_dir=test_log_dir)
-
-    # ダミーログを追加 (これによりセッションログファイルにも書き込まれる)
-    logger_instance.add_log("sent", "test_init", "初期化テスト用の送信プロンプト。")
-    logger_instance.add_log("received", "test_init", "初期化テスト用のAIレスポンス。")
-
-
-    def open_log_window():
-        new_log_win = CommunicationLogWindow(app)
-        # new_log_win.grab_set()
-
-    open_button = customtkinter.CTkButton(app, text="ログウィンドウを開く", command=open_log_window)
-    open_button.pack(pady=20, padx=20)
-
-    # テスト終了後にテストディレクトリを削除するための処理
-    def cleanup_test_dir():
-        import shutil
-        if os.path.exists(test_log_dir):
-            try:
-                shutil.rmtree(test_log_dir)
-                print(f"Cleaned up test directory: {test_log_dir}")
-            except Exception as e:
-                print(f"Error cleaning up test directory {test_log_dir}: {e}")
-        app.destroy() # アプリケーション終了
-
-    app.protocol("WM_DELETE_WINDOW", cleanup_test_dir)
-    app.mainloop()
+        # self.destroy() # launcher.py の _on_comm_log_close で destroy するので、ここでは不要
+        # ただし、protocolでこのメソッドが呼ばれるので、何もしないか、
+        # launcher側の処理を呼び出すようにするか、あるいはprotocol設定自体をlauncher側で行う。
+        # 今回はlauncher側でprotocolを設定しているので、このメソッドは呼ばれない想定。
+        # もし呼ばれる場合は、master (launcherのroot) の状態を確認するなど、
+        # launcher側のコールバックと協調する必要がある。
+        # 現状のlauncher.pyの実装では、CommunicationLogWindowインスタンスのprotocolを
+        # _on_comm_log_close に設定しているので、この on_closing は呼ばれない。
+        # よって、安全のために destroy() はコメントアウトしておく。
+        # print("CommunicationLogWindow on_closing called") # デバッグ用
+        pass
