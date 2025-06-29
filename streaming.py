@@ -58,10 +58,13 @@ import traceback # エラー追跡用に追加
 class AITuberStreamingSystem:
     """YouTubeライブ配信用AITuberシステム v2.1 - 修正版"""
 
-    def __init__(self, config, character_id, character_manager, voice_manager, audio_player, log_callback):
+    def __init__(self, config, character_id, character_manager, voice_manager, audio_player, log_callback, youtube_live_id=None, response_interval=5.0, auto_response_enabled=True): # youtube_live_id, response_interval, auto_response_enabled を追加
         self.config = config
         self.character_id = character_id
         self.character_manager = character_manager
+        self.youtube_live_id = youtube_live_id # インスタンス変数として保存
+        self.response_interval = response_interval # インスタンス変数として保存
+        self.auto_response_enabled = auto_response_enabled # インスタンス変数として保存
         self.voice_manager = voice_manager  # 更新された音声管理システム
         self.audio_player = audio_player
         self.log = log_callback
@@ -138,11 +141,14 @@ class AITuberStreamingSystem:
             # generated_text は既にデフォルトエラーメッセージに設定済み
         return generated_text
 
-    async def run_streaming(self, live_id):
+    async def run_streaming(self): # live_id 引数を削除
         """配信メインループ"""
         try:
             self.log("配信準備中...")
-            self.chat_id = await self.get_chat_id(live_id)
+            if not self.youtube_live_id: # インスタンス変数をチェック
+                self.log("❌ YouTube Live IDが設定されていません。配信を開始できません。")
+                return
+            self.chat_id = await self.get_chat_id(self.youtube_live_id) # インスタンス変数を使用
             if not self.chat_id:
                 self.log("❌ チャットIDの取得に失敗しました。配信を開始できません。")
                 return
@@ -163,21 +169,24 @@ class AITuberStreamingSystem:
 
                         if comment_text != self.previous_comment:
                             self.log(f"💬 {author_name}: {comment_text}")
-                            response_text = await self.generate_response(comment_text, author_name)
+                            if self.auto_response_enabled: # 自動応答が有効な場合のみ処理
+                                response_text = await self.generate_response(comment_text, author_name)
 
-                            if response_text:
-                                self.log(f"🤖 {char_name}: {response_text}")
-                                await self.synthesize_and_play(response_text)
-                                history_length = self.config.get_system_setting("conversation_history_length", 0)
-                                if history_length > 0:
-                                    self.chat_history.append({"user": author_name, "comment": comment_text, "response": response_text})
-                                    if len(self.chat_history) > history_length:
-                                        self.chat_history.pop(0)
+                                if response_text:
+                                    self.log(f"🤖 {char_name}: {response_text}")
+                                    await self.synthesize_and_play(response_text)
+                                    history_length = self.config.get_system_setting("conversation_history_length", 0)
+                                    if history_length > 0:
+                                        self.chat_history.append({"user": author_name, "comment": comment_text, "response": response_text})
+                                        if len(self.chat_history) > history_length:
+                                            self.chat_history.pop(0)
+                            else:
+                                self.log(f"ℹ️ 自動応答が無効なため、コメントへの返信はスキップされました: {comment_text}")
                             self.previous_comment = comment_text
-                    await asyncio.sleep(self.config.get_system_setting("chat_monitor_interval", 5))
+                    await asyncio.sleep(self.response_interval) # response_interval を使用
                 except Exception as loop_e: # ループ内のエラー
                     self.log(f"⚠️ 配信ループ中にエラー: {loop_e}\n{traceback.format_exc()}")
-                    await asyncio.sleep(10) # 少し待って再試行
+                    await asyncio.sleep(self.response_interval) # エラー時も指定された間隔で待機
         except Exception as main_e: # メイン処理のエラー
             self.log(f"❌ 配信処理全体でエラー: {main_e}\n{traceback.format_exc()}")
         finally:
@@ -194,10 +203,25 @@ class AITuberStreamingSystem:
             response.raise_for_status()
             data = response.json()
             if data.get('items'):
-                return data['items'][0].get('liveStreamingDetails', {}).get('activeLiveChatId')
+                live_streaming_details = data['items'][0].get('liveStreamingDetails')
+                if live_streaming_details:
+                    active_chat_id = live_streaming_details.get('activeLiveChatId')
+                    if active_chat_id:
+                        return active_chat_id
+                    else:
+                        self.log(f"チャットID取得エラー: 'activeLiveChatId' がレスポンスに含まれていません。Live Streaming Details: {live_streaming_details}")
+                        return None
+                else:
+                    self.log(f"チャットID取得エラー: 'liveStreamingDetails' がレスポンスに含まれていません。API Response Items: {data['items']}")
+                    return None
+            else:
+                self.log(f"チャットID取得エラー: 'items' がレスポンスに含まれていません。API Response: {data}")
+                return None
+        except requests.exceptions.HTTPError as http_err:
+            self.log(f"チャットID取得 HTTPエラー: Status {http_err.response.status_code}, Response: {http_err.response.text}")
             return None
         except Exception as e:
-            self.log(f"チャットID取得エラー: {e}")
+            self.log(f"チャットID取得中に予期せぬエラー: {e}\n{traceback.format_exc()}")
             return None
 
     async def get_latest_comments(self, max_results=50):
