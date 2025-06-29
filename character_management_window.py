@@ -557,8 +557,7 @@ class CharacterManagementWindow:
         if not source_char_data: messagebox.showerror("エラー", "複製元キャラクターデータが見つかりません", parent=self.root); return
 
         # CTkInputDialog を使用
-        dialog = customtkinter.CTkInputDialog(text="新しいキャラクター名:", title="キャラクター複製",
-                                              entry_font=self.default_font, button_font=self.default_font)
+        dialog = customtkinter.CTkInputDialog(text="新しいキャラクター名:", title="キャラクター複製")
         new_name = dialog.get_input() # .get_input()で値を取得
 
         if new_name: # Noneや空文字列でないことを確認
@@ -637,8 +636,7 @@ class CharacterManagementWindow:
         if not char_data: messagebox.showerror("エラー", "キャラクターデータが見つかりません。", parent=self.root); return
 
         # CTkInputDialog を使用
-        dialog = customtkinter.CTkInputDialog(text="テストするテキストを入力してください:", title="音声テスト",
-                                              entry_font=self.default_font, button_font=self.default_font)
+        dialog = customtkinter.CTkInputDialog(text="テストするテキストを入力してください:", title="音声テスト")
         test_text = dialog.get_input()
         if not test_text: return
 
