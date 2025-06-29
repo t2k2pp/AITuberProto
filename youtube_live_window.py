@@ -253,7 +253,7 @@ class YouTubeLiveWindow:
         try:
             # AITuberStreamingSystem の run_streaming (またはそれに類するメソッド) を呼び出す
             # このメソッドは self.is_streaming フラグを見てループ制御する想定
-            loop.run_until_complete(self.aituber_system_instance.run_youtube_live_loop(lambda: self.is_streaming))
+            loop.run_until_complete(self.aituber_system_instance.run_streaming()) # 引数なしで呼び出し、メソッド名を修正
         except Exception as e:
             self.log(f"❌ 配信ループ中にエラー: {e}")
             # エラー発生時もUIの状態を更新
