@@ -136,6 +136,19 @@ class DebugWindow:
         self.voice_model_test_combo = customtkinter.CTkComboBox(engine_select_frame, variable=self.test_voice_model_var,
                                        state="readonly", width=220, font=self.default_font)
         self.voice_model_test_combo.pack(side="left", padx=5)
+        
+        characters = self.character_manager.get_all_characters()
+        char_options = [f"{data.get('name', 'Unknown')} ({char_id})" for char_id, data in characters.items()]
+        self.voice_model_test_combo.configure(values=char_options if char_options else ["キャラクターなし"])
+        if char_options:
+            current_selection_text = self.test_voice_model_var.get()
+            if current_selection_text in char_options: self.test_voice_model_var.set(current_selection_text)
+            else: self.test_voice_model_var.set(char_options[0])
+            #self.on_test_character_selected()
+        else:
+            self.test_voice_model_var.set("キャラクターなし")
+            self.current_test_character_id = None
+        self.log("デバッグ用キャラクタードロップダウンを更新。")
 
         text_frame = customtkinter.CTkFrame(parent_frame, fg_color="transparent")
         text_frame.pack(fill="x", pady=5)
@@ -161,10 +174,27 @@ class DebugWindow:
         char_select_frame = customtkinter.CTkFrame(parent_frame, fg_color="transparent")
         char_select_frame.pack(fill="x", pady=5)
         customtkinter.CTkLabel(char_select_frame, text="テスト用キャラクター:", font=self.default_font).pack(side="left")
+
         self.test_char_var = tk.StringVar()
         self.test_char_combo = customtkinter.CTkComboBox(char_select_frame, variable=self.test_char_var, state="readonly", width=250, font=self.default_font, command=self.on_test_character_selected)
         self.test_char_combo.pack(side="left", padx=5)
         customtkinter.CTkButton(char_select_frame, text="🔄 更新", command=self.refresh_test_character_dropdown, font=self.default_font, width=60).pack(side="left", padx=2)
+
+
+        characters = self.character_manager.get_all_characters()
+        char_options = [f"{data.get('name', 'Unknown')} ({char_id})" for char_id, data in characters.items()]
+        self.test_char_combo.configure(values=char_options if char_options else ["キャラクターなし"])
+        if char_options:
+            current_selection_text = self.test_char_var.get()
+            if current_selection_text in char_options: self.test_char_var.set(current_selection_text)
+            else: self.test_char_var.set(char_options[0])
+            self.on_test_character_selected()
+        else:
+            self.test_char_var.set("キャラクターなし")
+            self.current_test_character_id = None
+        self.log("デバッグ用キャラクタードロップダウンを更新。")
+
+
 
         chat_control_frame = customtkinter.CTkFrame(parent_frame, fg_color="transparent")
         chat_control_frame.pack(fill="x", pady=(0,5))
