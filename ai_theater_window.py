@@ -47,6 +47,12 @@ class AITheaterWindow:
         self.is_playing_script = False
         self.stop_requested = False
 
+        # 現在のキャラクターIDを取得
+        self.current_character_id = self.config_manager.config.get("streaming_settings", {}).get("current_character")
+        if not self.current_character_id:
+            self.log("AI劇場: 初期化時にアクティブなキャラクターIDが設定されていません。")
+            # 必要であれば、デフォルトのキャラクターIDを設定するなどのフォールバック処理をここに追加できます。
+
         # フォント設定
         self.default_font = ("Yu Gothic UI", 12)
         if sys.platform == "darwin": self.default_font = ("Hiragino Sans", 14)
@@ -233,7 +239,7 @@ class AITheaterWindow:
             self.audio_output_folder = None
             return
 
-        self.loaded_csv_label.config(text=f"ファイル: {Path(filepath).name}")
+        self.loaded_csv_label.configure(text=f"ファイル: {Path(filepath).name}")
         self.script_tree.delete(*self.script_tree.get_children()) # 古い内容をクリア
 
         try:
@@ -243,9 +249,15 @@ class AITheaterWindow:
             line_num = 1
             active_character_name = "ナレーター" # デフォルト話者
             if self.current_character_id:
-                char_data = self.config.get_character(self.current_character_id)
+                # config_manager を使用するように修正
+                char_data = self.config_manager.get_character(self.current_character_id)
                 if char_data and char_data.get('name'):
                     active_character_name = char_data.get('name')
+                else:
+                    self.log(f"AI劇場: current_character_id '{self.current_character_id}' に対応するキャラクターデータが見つかりませんでした。")
+            else:
+                self.log("AI劇場: current_character_idが設定されていません。デフォルト話者 'ナレーター' を使用します。")
+
 
             self.log(f"AI劇場: テキスト読み込み時のデフォルト話者: {active_character_name}")
 
@@ -295,13 +307,13 @@ class AITheaterWindow:
             self.log(f"AI劇場: ファイルが見つかりません: {filepath}")
             self.current_script_path = None
             self.audio_output_folder = None
-            self.loaded_csv_label.config(text="ファイル: 未読み込み")
+            self.loaded_csv_label.configure(text="ファイル: 未読み込み")
         except Exception as e:
             messagebox.showerror("テキスト読み込みエラー", f"テキストファイルの読み込み中にエラーが発生しました: {e}")
             self.log(f"AI劇場: テキスト読み込みエラー: {e}")
             self.current_script_path = None
             self.audio_output_folder = None
-            self.loaded_csv_label.config(text="ファイル: 未読み込み")
+            self.loaded_csv_label.configure(text="ファイル: 未読み込み")
 
     def create_new_csv_script_action(self):
         filepath = filedialog.asksaveasfilename(title="新規CSV台本を保存", defaultextension=".csv", filetypes=[("CSVファイル", "*.csv")], parent=self.root)
