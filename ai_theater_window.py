@@ -77,6 +77,7 @@ class AITheaterWindow:
         top_frame = customtkinter.CTkFrame(main_frame, fg_color="transparent")
         top_frame.pack(fill="x", padx=5, pady=5)
         customtkinter.CTkButton(top_frame, text="📜 CSV台本読み込み", command=self.load_csv_script_action, font=self.default_font).pack(side="left", padx=5)
+        customtkinter.CTkButton(top_frame, text="📜 TXT台本読み込み", command=self.load_text_script , font=self.default_font).pack(side="left", padx=5)
         customtkinter.CTkButton(top_frame, text="✨ 新規CSV台本作成", command=self.create_new_csv_script_action, font=self.default_font).pack(side="left", padx=5)
         self.loaded_csv_label = customtkinter.CTkLabel(top_frame, text="CSVファイル: 未読み込み", font=self.default_font)
         self.loaded_csv_label.pack(side="left", padx=10)
@@ -205,6 +206,102 @@ class AITheaterWindow:
         except Exception as e:
             messagebox.showerror("CSV読み込みエラー", f"エラー: {e}", parent=self.root)
             self.current_script_path = None; self.audio_output_folder = None
+
+    def load_text_script(self):
+        """テキスト台本ファイルを読み込み、内容をパースしてUIに表示する。"""
+        filepath = filedialog.askopenfilename(
+            title="テキスト台本ファイルを選択",
+            filetypes=(("テキストファイル", "*.txt"), ("すべてのファイル", "*.*"))
+        )
+        if not filepath:
+            self.log("AI劇場: テキスト台本ファイルの選択がキャンセルされました。")
+            return
+
+        self.current_script_path = filepath
+        self.script_data = []
+
+        # 音声保存フォルダの作成 (例: script_name_audio)
+        script_filename = Path(filepath).stem
+        self.audio_output_folder = Path(filepath).parent / f"{script_filename}_audio"
+        try:
+            self.audio_output_folder.mkdir(parents=True, exist_ok=True)
+            self.log(f"AI劇場: 音声保存フォルダを作成/確認しました: {self.audio_output_folder}")
+        except Exception as e:
+            self.log(f"AI劇場: 音声保存フォルダの作成に失敗しました: {e}")
+            messagebox.showerror("エラー", f"音声保存フォルダの作成に失敗しました: {e}")
+            self.current_script_path = None
+            self.audio_output_folder = None
+            return
+
+        self.loaded_csv_label.config(text=f"ファイル: {Path(filepath).name}")
+        self.script_tree.delete(*self.script_tree.get_children()) # 古い内容をクリア
+
+        try:
+            with open(filepath, 'r', encoding='utf-8') as f_in:
+                lines = f_in.readlines()
+
+            line_num = 1
+            active_character_name = "ナレーター" # デフォルト話者
+            if self.current_character_id:
+                char_data = self.config.get_character(self.current_character_id)
+                if char_data and char_data.get('name'):
+                    active_character_name = char_data.get('name')
+
+            self.log(f"AI劇場: テキスト読み込み時のデフォルト話者: {active_character_name}")
+
+            i = 0
+            while i < len(lines):
+                line_content = lines[i].strip()
+                if not line_content: # 空行の場合
+                    empty_line_count = 0
+                    # 連続する空行をカウント
+                    while i < len(lines) and not lines[i].strip():
+                        empty_line_count += 1
+                        i += 1
+
+                    wait_time = empty_line_count * 0.5
+                    self.script_data.append({
+                        'line': line_num,
+                        'action': "wait",
+                        'talker': "",
+                        'words': str(wait_time),
+                        'status': '未生成'
+                    })
+                    self.script_tree.insert('', 'end', values=(
+                        line_num, "wait", "", str(wait_time), '未生成'
+                    ))
+                    line_num += 1
+                    # i は既に次の非空行またはファイル終端を指しているので、ここではインクリメントしない
+                else: # 空行でない場合
+                    self.script_data.append({
+                        'line': line_num,
+                        'action': "talk",
+                        'talker': active_character_name,
+                        'words': line_content,
+                        'status': '未生成'
+                    })
+                    self.script_tree.insert('', 'end', values=(
+                        line_num, "talk", active_character_name, line_content, '未生成'
+                    ))
+                    line_num += 1
+                    i += 1
+
+            self.log(f"AI劇場: テキストファイル '{filepath}' を読み込みました。全{len(self.script_data)}行。")
+            if not self.script_data:
+                messagebox.showinfo("情報", "読み込んだテキストファイルは空、または処理できる内容がありませんでした。")
+
+        except FileNotFoundError:
+            messagebox.showerror("エラー", f"ファイルが見つかりません: {filepath}")
+            self.log(f"AI劇場: ファイルが見つかりません: {filepath}")
+            self.current_script_path = None
+            self.audio_output_folder = None
+            self.loaded_csv_label.config(text="ファイル: 未読み込み")
+        except Exception as e:
+            messagebox.showerror("テキスト読み込みエラー", f"テキストファイルの読み込み中にエラーが発生しました: {e}")
+            self.log(f"AI劇場: テキスト読み込みエラー: {e}")
+            self.current_script_path = None
+            self.audio_output_folder = None
+            self.loaded_csv_label.config(text="ファイル: 未読み込み")
 
     def create_new_csv_script_action(self):
         filepath = filedialog.asksaveasfilename(title="新規CSV台本を保存", defaultextension=".csv", filetypes=[("CSVファイル", "*.csv")], parent=self.root)
