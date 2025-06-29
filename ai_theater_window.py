@@ -10,6 +10,7 @@ import threading
 import time
 import wave
 import shutil
+import chardet # 文字コード判別ライブラリ
 
 from config import ConfigManager
 from character_manager import CharacterManager
@@ -188,21 +189,58 @@ class AITheaterWindow:
             messagebox.showerror("フォルダ作成エラー", f"音声保存フォルダの作成失敗: {e}", parent=self.root)
             self.current_script_path = None; self.audio_output_folder = None; return
 
-        self.loaded_csv_label.configure(text=f"CSV: {self.current_script_path.name}")
+        self.loaded_csv_label.configure(text=f"CSV: {self.current_script_path.name}") # .configure
         self.script_tree.delete(*self.script_tree.get_children())
         try:
-            with open(self.current_script_path, 'r', encoding='utf-8', newline='') as csvfile:
-                reader = csv.DictReader(csvfile)
-                if reader.fieldnames != ['action', 'talker', 'words']:
-                    messagebox.showerror("CSVフォーマットエラー", "ヘッダーが不正です (action,talker,words)", parent=self.root)
-                    self.current_script_path = None; self.audio_output_folder = None; return
-                for i, row in enumerate(reader):
-                    line_num = i + 1; status = "未生成"
-                    audio_file_for_line = self.audio_output_folder / f"{line_num:06d}.wav"
-                    if audio_file_for_line.exists(): status = "成功"
-                    self.script_data.append({'line': line_num, **row, 'status': status})
-                    self.script_tree.insert('', 'end', values=(line_num, row['action'], row['talker'], row['words'], status))
-            self.log(f"CSV読み込み完了: {self.current_script_path} ({len(self.script_data)}行)")
+            # --- 文字コード自動判別処理 ---
+            with open(self.current_script_path, 'rb') as f_raw:
+                raw_data = f_raw.read()
+
+            detected_encoding_info = chardet.detect(raw_data)
+            encoding_to_try = detected_encoding_info['encoding']
+            confidence = detected_encoding_info['confidence']
+            self.log(f"AI劇場: CSVファイル '{self.current_script_path}' の文字コード判別結果: {encoding_to_try}, 信頼度: {confidence}")
+
+            if encoding_to_try is None or confidence < 0.7:
+                self.log(f"AI劇場: 判別された文字コードの信頼度が低いため ({confidence})、フォールバック試行。")
+                encodings_to_attempt = ['utf-8', 'shift_jis', 'euc_jp']
+            else:
+                encodings_to_attempt = [encoding_to_try, 'utf-8', 'shift_jis', 'euc_jp']
+
+            reader = None
+            used_encoding = None
+            for enc in list(dict.fromkeys(enc for enc in encodings_to_attempt if enc)): # Noneを除外
+                try:
+                    with open(self.current_script_path, 'r', encoding=enc, newline='') as csvfile:
+                        reader = csv.DictReader(csvfile)
+                        if reader.fieldnames != ['action', 'talker', 'words']:
+                            self.log(f"AI劇場: エンコーディング '{enc}' でCSV読み込み試行、ヘッダー不正。")
+                            reader = None
+                            continue
+                    used_encoding = enc
+                    self.log(f"AI劇場: CSVファイルをエンコーディング '{enc}' で読み込み成功。")
+                    break
+                except UnicodeDecodeError:
+                    self.log(f"AI劇場: エンコーディング '{enc}' でのCSVファイル読み込み失敗。")
+                    continue
+                except Exception as e_csv_read:
+                    self.log(f"AI劇場: エンコーディング '{enc}' でCSV読み込み中エラー: {e_csv_read}")
+                    reader = None
+                    continue
+
+            if reader is None:
+                messagebox.showerror("CSV読み込みエラー", "ファイルの文字コードを自動判別できないか、CSVの形式が不正です。ヘッダーは 'action,talker,words' である必要があります。", parent=self.root)
+                self.log(f"AI劇場: CSVファイル '{self.current_script_path}' の適切なエンコーディングまたは形式が見つかりませんでした。")
+                self.current_script_path = None; self.audio_output_folder = None; return
+            # --- 文字コード自動判別処理ここまで ---
+
+            for i, row in enumerate(reader):
+                line_num = i + 1; status = "未生成"
+                audio_file_for_line = self.audio_output_folder / f"{line_num:06d}.wav"
+                if audio_file_for_line.exists(): status = "成功"
+                self.script_data.append({'line': line_num, **row, 'status': status})
+                self.script_tree.insert('', 'end', values=(line_num, row['action'], row['talker'], row['words'], status))
+            self.log(f"CSV読み込み完了: {self.current_script_path} ({len(self.script_data)}行、エンコーディング: {used_encoding})")
         except Exception as e:
             messagebox.showerror("CSV読み込みエラー", f"エラー: {e}", parent=self.root)
             self.current_script_path = None; self.audio_output_folder = None
@@ -211,7 +249,8 @@ class AITheaterWindow:
         """テキスト台本ファイルを読み込み、内容をパースしてUIに表示する。"""
         filepath = filedialog.askopenfilename(
             title="テキスト台本ファイルを選択",
-            filetypes=(("テキストファイル", "*.txt"), ("すべてのファイル", "*.*"))
+            filetypes=(("テキストファイル", "*.txt"), ("すべてのファイル", "*.*")),
+            parent=self.root # parent追加
         )
         if not filepath:
             self.log("AI劇場: テキスト台本ファイルの選択がキャンセルされました。")
@@ -220,7 +259,6 @@ class AITheaterWindow:
         self.current_script_path = filepath
         self.script_data = []
 
-        # 音声保存フォルダの作成 (例: script_name_audio)
         script_filename = Path(filepath).stem
         self.audio_output_folder = Path(filepath).parent / f"{script_filename}_audio"
         try:
@@ -228,57 +266,86 @@ class AITheaterWindow:
             self.log(f"AI劇場: 音声保存フォルダを作成/確認しました: {self.audio_output_folder}")
         except Exception as e:
             self.log(f"AI劇場: 音声保存フォルダの作成に失敗しました: {e}")
-            messagebox.showerror("エラー", f"音声保存フォルダの作成に失敗しました: {e}")
+            messagebox.showerror("エラー", f"音声保存フォルダの作成に失敗しました: {e}", parent=self.root) # parent追加
             self.current_script_path = None
             self.audio_output_folder = None
             return
 
-        self.loaded_csv_label.config(text=f"ファイル: {Path(filepath).name}")
-        self.script_tree.delete(*self.script_tree.get_children()) # 古い内容をクリア
+        self.loaded_csv_label.configure(text=f"ファイル: {Path(filepath).name}") # .configure
+        self.script_tree.delete(*self.script_tree.get_children())
 
         try:
-            with open(filepath, 'r', encoding='utf-8') as f_in:
-                lines = f_in.readlines()
+            # --- 文字コード自動判別処理 ---
+            with open(filepath, 'rb') as f_raw:
+                raw_data = f_raw.read()
+
+            detected_encoding_info = chardet.detect(raw_data)
+            encoding_to_try = detected_encoding_info['encoding']
+            confidence = detected_encoding_info['confidence']
+            self.log(f"AI劇場: テキストファイル '{filepath}' の文字コード判別結果: {encoding_to_try}, 信頼度: {confidence}")
+
+            if encoding_to_try is None or confidence < 0.7:
+                self.log(f"AI劇場: 判別された文字コードの信頼度が低いため ({confidence})、フォールバック試行。")
+                encodings_to_attempt = ['utf-8', 'shift_jis', 'euc_jp']
+            else:
+                encodings_to_attempt = [encoding_to_try, 'utf-8', 'shift_jis', 'euc_jp']
+
+            lines = None
+            used_encoding = None
+            for enc in list(dict.fromkeys(enc for enc in encodings_to_attempt if enc)): # Noneを除外
+                try:
+                    with open(filepath, 'r', encoding=enc) as f_in:
+                        lines = f_in.readlines()
+                    used_encoding = enc
+                    self.log(f"AI劇場: テキストファイルをエンコーディング '{enc}' で読み込み成功。")
+                    break
+                except UnicodeDecodeError:
+                    self.log(f"AI劇場: エンコーディング '{enc}' でのテキストファイル読み込み失敗。")
+                    continue
+                except Exception as e_open:
+                    self.log(f"AI劇場: エンコーディング '{enc}' でファイルオープン中エラー: {e_open}")
+                    continue
+
+            if lines is None:
+                messagebox.showerror("テキスト読み込みエラー", f"ファイルの文字コードを自動判別できませんでした。サポートされていない形式か、ファイルが破損している可能性があります。", parent=self.root) # parent追加
+                self.log(f"AI劇場: テキストファイル '{filepath}' の適切なエンコーディングが見つかりませんでした。")
+                self.current_script_path = None
+                self.audio_output_folder = None
+                self.loaded_csv_label.configure(text="ファイル: 未読み込み") # .configure
+                return
+            # --- 文字コード自動判別処理ここまで ---
 
             line_num = 1
-            active_character_name = "ナレーター" # デフォルト話者
-            if self.current_character_id:
-                char_data = self.config.get_character(self.current_character_id)
+            active_character_name = "ナレーター"
+            current_char_id = getattr(self, 'current_character_id', None)
+            if current_char_id:
+                char_data = self.config_manager.get_character(current_char_id) if hasattr(self, 'config_manager') else None
                 if char_data and char_data.get('name'):
                     active_character_name = char_data.get('name')
 
-            self.log(f"AI劇場: テキスト読み込み時のデフォルト話者: {active_character_name}")
+            self.log(f"AI劇場: テキスト読み込み時のデフォルト話者: {active_character_name} (エンコーディング: {used_encoding})")
 
             i = 0
             while i < len(lines):
                 line_content = lines[i].strip()
-                if not line_content: # 空行の場合
+                if not line_content:
                     empty_line_count = 0
-                    # 連続する空行をカウント
                     while i < len(lines) and not lines[i].strip():
                         empty_line_count += 1
                         i += 1
-
                     wait_time = empty_line_count * 0.5
                     self.script_data.append({
-                        'line': line_num,
-                        'action': "wait",
-                        'talker': "",
-                        'words': str(wait_time),
-                        'status': '未生成'
+                        'line': line_num, 'action': "wait", 'talker': "",
+                        'words': str(wait_time), 'status': '未生成'
                     })
                     self.script_tree.insert('', 'end', values=(
                         line_num, "wait", "", str(wait_time), '未生成'
                     ))
                     line_num += 1
-                    # i は既に次の非空行またはファイル終端を指しているので、ここではインクリメントしない
-                else: # 空行でない場合
+                else:
                     self.script_data.append({
-                        'line': line_num,
-                        'action': "talk",
-                        'talker': active_character_name,
-                        'words': line_content,
-                        'status': '未生成'
+                        'line': line_num, 'action': "talk", 'talker': active_character_name,
+                        'words': line_content, 'status': '未生成'
                     })
                     self.script_tree.insert('', 'end', values=(
                         line_num, "talk", active_character_name, line_content, '未生成'
@@ -288,20 +355,20 @@ class AITheaterWindow:
 
             self.log(f"AI劇場: テキストファイル '{filepath}' を読み込みました。全{len(self.script_data)}行。")
             if not self.script_data:
-                messagebox.showinfo("情報", "読み込んだテキストファイルは空、または処理できる内容がありませんでした。")
+                messagebox.showinfo("情報", "読み込んだテキストファイルは空、または処理できる内容がありませんでした。", parent=self.root) # parent追加
 
         except FileNotFoundError:
-            messagebox.showerror("エラー", f"ファイルが見つかりません: {filepath}")
+            messagebox.showerror("エラー", f"ファイルが見つかりません: {filepath}", parent=self.root) # parent追加
             self.log(f"AI劇場: ファイルが見つかりません: {filepath}")
             self.current_script_path = None
             self.audio_output_folder = None
-            self.loaded_csv_label.config(text="ファイル: 未読み込み")
+            self.loaded_csv_label.configure(text="ファイル: 未読み込み") # .configure
         except Exception as e:
-            messagebox.showerror("テキスト読み込みエラー", f"テキストファイルの読み込み中にエラーが発生しました: {e}")
+            messagebox.showerror("テキスト読み込みエラー", f"テキストファイルの読み込み中にエラーが発生しました: {e}", parent=self.root) # parent追加
             self.log(f"AI劇場: テキスト読み込みエラー: {e}")
             self.current_script_path = None
             self.audio_output_folder = None
-            self.loaded_csv_label.config(text="ファイル: 未読み込み")
+            self.loaded_csv_label.configure(text="ファイル: 未読み込み") # .configure
 
     def create_new_csv_script_action(self):
         filepath = filedialog.asksaveasfilename(title="新規CSV台本を保存", defaultextension=".csv", filetypes=[("CSVファイル", "*.csv")], parent=self.root)
