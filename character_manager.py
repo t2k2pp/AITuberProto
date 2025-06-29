@@ -333,3 +333,20 @@ YouTubeライブ配信での短時間の応答に適した内容にしてくだ�
             if char_data.get("name") == char_name:
                 return char_id
         return None
+
+    def delete_character(self, char_id):
+        """
+        指定されたキャラクターIDのキャラクターを削除する。
+        実際にはConfigManagerのdelete_characterメソッドを呼び出す。
+        """
+        try:
+            if self.config.delete_character(char_id):
+                # logging.info(f"キャラクター (ID: {char_id}) の削除に成功しました。") # CharacterManagerではロギングしない方針の場合
+                return True
+            else:
+                # logging.warning(f"キャラクター (ID: {char_id}) の削除に失敗しました。IDが存在しない可能性があります。")
+                return False
+        except Exception as e:
+            # logging.error(f"キャラクター (ID: {char_id}) の削除中にエラーが発生しました: {e}", exc_info=True)
+            print(f"キャラクター (ID: {char_id}) の削除中にエラーが発生しました: {e}") # GUIがない場合はprint
+            return False
