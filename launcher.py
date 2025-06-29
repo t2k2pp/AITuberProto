@@ -118,7 +118,7 @@ class LauncherWindow:
         # メイン機能フレームとサブ機能フレームの間にスペーサーを挟むか、
         # main_frame の pack expand をうまく使う必要がある。
         # ここでは、サブ機能フレームを main_frame の下部に配置するために side=tk.BOTTOM を使う
-        sub_button_outer_frame.pack(pady=(10, 20), fill="x", expand=False, side="bottom") # 下部に配置, pady調整
+        sub_button_outer_frame.pack(pady=(10, 20), fill="x", expand=False, side="top") # 下部に配置, pady調整
         customtkinter.CTkLabel(sub_button_outer_frame, text="サブ機能", font=(default_font_tuple[0], default_font_tuple[1], "bold")).pack(anchor="w", padx=10)
         sub_button_frame = customtkinter.CTkFrame(sub_button_outer_frame, fg_color="transparent")
         sub_button_frame.pack(fill="x")
