@@ -10,11 +10,14 @@ import time # 追加
 # CommunicationLogWindow と CommunicationLogger をインポート
 from communication_log_window import CommunicationLogWindow
 from communication_logger import CommunicationLogger
+from i18n_setup import get_translator # 翻訳関数を取得
+
+_ = get_translator() # モジュールレベルで翻訳関数を取得
 
 class LauncherWindow:
     def __init__(self, root: customtkinter.CTk):
         self.root = root
-        self.root.title("AITuber Launcher")
+        self.root.title(_("launcher.title"))
         self.root.geometry("450x550")
 
         # --- CommunicationLoggerの初期化と環境変数設定 ---
@@ -34,14 +37,14 @@ class LauncherWindow:
             # エラー処理: 環境変数が設定できない場合、サブプロセスでのログ記録が期待通りに動作しない可能性
             # ここでアプリケーションを終了させるか、警告を出すかなどの判断が必要
             # 今回は警告のみとする
-            tkinter.messagebox.showwarning("ロガー初期化エラー", "セッションログパスの取得に失敗しました。\nサブプロセスのログが正しく記録されない可能性があります。")
+            tkinter.messagebox.showwarning(_("launcher.logger_init_error.title"), _("launcher.logger_init_error.session_log_path_failure"))
 
         if log_dir_path:
             os.environ['GLOBAL_LOG_DIR_PATH'] = os.path.abspath(log_dir_path)
             print(f"Launcher: Set GLOBAL_LOG_DIR_PATH = {os.environ['GLOBAL_LOG_DIR_PATH']}")
         else:
             print("Launcher: Error: Could not get log directory path from CommunicationLogger.")
-            tkinter.messagebox.showwarning("ロガー初期化エラー", "ログディレクトリパスの取得に失敗しました。\nサブプロセスのログが正しく記録されない可能性があります。")
+            tkinter.messagebox.showwarning(_("launcher.logger_init_error.title"), _("launcher.logger_init_error.log_dir_path_failure"))
         # --- ここまで追加 ---
 
         self.active_modules = {}
@@ -68,22 +71,23 @@ class LauncherWindow:
         main_frame = customtkinter.CTkFrame(root, corner_radius=10) # fg_colorで背景色も指定可能
         main_frame.pack(expand=True, fill="both", padx=20, pady=20)
 
-        header_label = customtkinter.CTkLabel(main_frame, text="AITuber 機能ランチャー", font=header_font_tuple)
+        header_label = customtkinter.CTkLabel(main_frame, text=_("launcher.header_label"), font=header_font_tuple)
         header_label.pack(pady=(10, 25))
 
         # メイン機能とサブ機能のボタン設定を分離
+        # ボタンのテキストとタイトルも翻訳対象とする
         main_features_config = [
-            {"text": "YoutubeLive", "module_name": "youtube_live_window.py", "title": "YouTube Live 配信"},
-            {"text": "AI劇場", "module_name": "ai_theater_window.py", "title": "AI劇場"},
-            {"text": "AIチャット", "module_name": "ai_chat_window.py", "title": "AIチャット"},
-            {"text": "キャラクター管理", "module_name": "character_management_window.py", "title": "キャラクター管理"},
+            {"text_key": "launcher.button.youtube_live", "module_name": "youtube_live_window.py", "title_key": "launcher.window_title.youtube_live"},
+            {"text_key": "launcher.button.ai_theater", "module_name": "ai_theater_window.py", "title_key": "launcher.window_title.ai_theater"},
+            {"text_key": "launcher.button.ai_chat", "module_name": "ai_chat_window.py", "title_key": "launcher.window_title.ai_chat"},
+            {"text_key": "launcher.button.character_management", "module_name": "character_management_window.py", "title_key": "launcher.window_title.character_management"},
         ]
 
         sub_features_config = [
-            {"text": "設定画面", "module_name": "settings_window.py", "title": "設定画面"},
-            {"text": "デバッグ", "module_name": "debug_window.py", "title": "デバッグ・テスト画面"},
-            {"text": "ヘルプ", "module_name": "help_window.py", "title": "ヘルプ"},
-            {"text": "通信詳細", "module_name": "communication_log_window.py", "title":"通信詳細"} # 新しいボタン情報を追加
+            {"text_key": "launcher.button.settings", "module_name": "settings_window.py", "title_key": "launcher.window_title.settings"},
+            {"text_key": "launcher.button.debug", "module_name": "debug_window.py", "title_key": "launcher.window_title.debug"},
+            {"text_key": "launcher.button.help", "module_name": "help_window.py", "title_key": "launcher.window_title.help"},
+            {"text_key": "launcher.button.communication_log", "module_name": "communication_log_window.py", "title_key": "launcher.window_title.communication_log"} # 新しいボタン情報を追加
         ]
 
         button_width = 180  # CTkButtonの幅
@@ -92,7 +96,7 @@ class LauncherWindow:
         # メイン機能ボタン用フレーム
         main_button_outer_frame = customtkinter.CTkFrame(main_frame, fg_color="transparent")
         main_button_outer_frame.pack(pady=(10, 5), fill="x", expand=False) # 上部に配置、余白調整
-        customtkinter.CTkLabel(main_button_outer_frame, text="メイン機能", font=(default_font_tuple[0], default_font_tuple[1], "bold")).pack(anchor="w", padx=10)
+        customtkinter.CTkLabel(main_button_outer_frame, text=_("launcher.label.main_features"), font=(default_font_tuple[0], default_font_tuple[1], "bold")).pack(anchor="w", padx=10)
         main_button_frame = customtkinter.CTkFrame(main_button_outer_frame, fg_color="transparent")
         main_button_frame.pack(fill="x")
 
@@ -100,8 +104,8 @@ class LauncherWindow:
         for i, btn_config in enumerate(main_features_config):
             button = customtkinter.CTkButton(
                 main_button_frame, # 親フレームを main_button_frame に変更
-                text=btn_config["text"],
-                command=lambda m=btn_config["module_name"], t=btn_config["title"]: self.launch_module(m, t),
+                text=_(btn_config["text_key"]),
+                command=lambda m=btn_config["module_name"], tk=btn_config["title_key"]: self.launch_module(m, _(tk)),
                 font=default_font_tuple,
                 width=button_width,
                 height=button_height,
@@ -119,15 +123,15 @@ class LauncherWindow:
         # main_frame の pack expand をうまく使う必要がある。
         # ここでは、サブ機能フレームを main_frame の下部に配置するために side=tk.BOTTOM を使う
         sub_button_outer_frame.pack(pady=(10, 20), fill="x", expand=False, side="top") # 下部に配置, pady調整
-        customtkinter.CTkLabel(sub_button_outer_frame, text="サブ機能", font=(default_font_tuple[0], default_font_tuple[1], "bold")).pack(anchor="w", padx=10)
+        customtkinter.CTkLabel(sub_button_outer_frame, text=_("launcher.label.sub_features"), font=(default_font_tuple[0], default_font_tuple[1], "bold")).pack(anchor="w", padx=10)
         sub_button_frame = customtkinter.CTkFrame(sub_button_outer_frame, fg_color="transparent")
         sub_button_frame.pack(fill="x")
 
         for i, btn_config in enumerate(sub_features_config):
             button = customtkinter.CTkButton(
                 sub_button_frame, # 親フレームを sub_button_frame に変更
-                text=btn_config["text"],
-                command=lambda m=btn_config["module_name"], t=btn_config["title"]: self.launch_module(m, t),
+                text=_(btn_config["text_key"]),
+                command=lambda m=btn_config["module_name"], tk=btn_config["title_key"]: self.launch_module(m, _(tk)),
                 font=default_font_tuple,
                 width=button_width,
                 height=button_height,
@@ -142,7 +146,7 @@ class LauncherWindow:
 
         self.exit_button = customtkinter.CTkButton(
             exit_button_frame,
-            text="ランチャー終了",
+            text=_("launcher.button.exit"),
             command=self.on_launcher_close,
             font=default_font_tuple,
             fg_color="tomato",
@@ -155,7 +159,7 @@ class LauncherWindow:
         self.check_active_modules()
 
     def on_launcher_close(self):
-        if tkinter.messagebox.askyesno("終了確認", "起動中のすべての機能を終了し、ランチャーを閉じますか？", parent=self.root):
+        if tkinter.messagebox.askyesno(_("launcher.exit_confirmation.title"), _("launcher.exit_confirmation.message"), parent=self.root):
             print("Launcher closing. Terminating active modules...")
             active_processes_terminated = 0
             # イテレート中に変更する可能性があるのでリストのコピーを取る
@@ -197,10 +201,10 @@ class LauncherWindow:
                         win.activate()
                         print(f"Activated window: {window_title}")
                     else:
-                        tkinter.messagebox.showinfo("情報", f"{window_title} は起動中ですが、ウィンドウが見つかりませんでした。")
+                        tkinter.messagebox.showinfo(_("launcher.info.title"), _("launcher.info.window_not_found", window_title=window_title))
                 except Exception as e:
                     print(f"Error activating window {window_title}: {e}")
-                    tkinter.messagebox.showinfo("情報", f"{module_name} は既に起動しています。\nウィンドウの操作に失敗しました: {e}")
+                    tkinter.messagebox.showinfo(_("launcher.info.title"), _("launcher.info.already_running_activation_failed", module_name=module_name, error=e))
                 return
             else:
                 print(f"{module_name} was in active_modules but process ended. Removing.")
@@ -213,7 +217,7 @@ class LauncherWindow:
 
             if not os.path.exists(script_path):
                 print(f"Error: {script_path} not found.")
-                tkinter.messagebox.showerror("起動エラー", f"{module_name} が見つかりません。")
+                tkinter.messagebox.showerror(_("launcher.launch_error.title"), _("launcher.launch_error.module_not_found", module_name=module_name))
                 return
 
             # --- communication_log_window.py の特別扱い ---
@@ -238,7 +242,7 @@ class LauncherWindow:
 
         except Exception as e:
             print(f"Error launching {module_name}: {e}")
-            tkinter.messagebox.showerror("起動エラー", f"{module_name} の起動中にエラーが発生しました:\n{e}")
+            tkinter.messagebox.showerror(_("launcher.launch_error.title"), _("launcher.launch_error.generic_error", module_name=module_name, error=e))
 
     def _on_comm_log_close(self):
         """CommunicationLogWindowが閉じられたときのコールバック"""

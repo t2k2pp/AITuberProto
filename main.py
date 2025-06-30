@@ -1,5 +1,6 @@
 import customtkinter
 from launcher import LauncherWindow # gui.py から launcher.py に変更
+from i18n_setup import init_i18n, _ # 国際化初期化関数と翻訳関数をインポート
 import sys # Pythonのバージョンチェック用
 from tkinter import messagebox # エラー表示用
 import tkinter as tk # TkVersionのため、およびcheck_python_version内のtk.Tk()のため
@@ -24,6 +25,9 @@ def main():
         return
 
     try:
+        # 国際化設定を初期化
+        init_i18n()
+
         customtkinter.set_appearance_mode("System")  # Modes: "System" (default), "Dark", "Light"
         customtkinter.set_default_color_theme("blue")  # Themes: "blue" (default), "green", "dark-blue"
 
