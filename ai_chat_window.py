@@ -16,6 +16,7 @@ from audio_manager import VoiceEngineManager, AudioPlayer
 from google import genai
 from google.genai import types as genai_types
 from communication_logger import CommunicationLogger # 追加
+import i18n_setup # 追加
 
 import logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -23,11 +24,14 @@ logger = logging.getLogger(__name__)
 
 class AIChatWindow:
     def __init__(self, root: customtkinter.CTk):
+        i18n_setup.init_i18n() # 強制再初期化
+        self._ = i18n_setup.get_translator()
+
         self.root = root
-        self.root.title("AIチャット")
+        self.root.title(self._("ai_chat.title"))
         self.root.geometry("1000x750")
 
-        self.loading_label = customtkinter.CTkLabel(self.root, text="読み込み中...", font=("Yu Gothic UI", 18))
+        self.loading_label = customtkinter.CTkLabel(self.root, text=self._("ai_chat.loading"), font=("Yu Gothic UI", 18))
         self.loading_label.pack(expand=True, fill="both")
         self.root.update_idletasks()
 
@@ -48,9 +52,9 @@ class AIChatWindow:
         try:
             self.ai_chat_history_folder.mkdir(parents=True, exist_ok=True)
         except Exception as e:
-            logger.error(f"AIチャット履歴フォルダの作成失敗: {e}")
+            logger.error(self._("ai_chat.error.history_folder_creation_failed", e=e))
             # messagebox は _initialize_components 内で表示する方が安全
-            # messagebox.showerror("フォルダ作成エラー", f"AIチャット履歴フォルダ作成失敗: {e}", parent=self.root)
+            # messagebox.showerror(self._("ai_chat.messagebox.folder_creation_error.title"), self._("ai_chat.error.history_folder_creation_failed", e=e), parent=self.root)
 
         self.current_ai_chat_file_path = None
 
@@ -64,15 +68,16 @@ class AIChatWindow:
         self.populate_chat_character_dropdowns()
         self.load_chat_history_list()
         self.root.protocol("WM_DELETE_WINDOW", self.on_closing)
-        self.log("AIチャットウィンドウが初期化されました。")
+        self.log(self._("ai_chat.log.init_completed"))
         # エラー発生時のメッセージボックス表示 (もしあれば)
         if not self.ai_chat_history_folder.exists():
-             messagebox.showerror("フォルダ作成エラー", f"AIチャット履歴フォルダ作成に失敗しました。\nパス: {self.ai_chat_history_folder}", parent=self.root)
+             messagebox.showerror(self._("ai_chat.messagebox.folder_creation_error.title"), self._("ai_chat.messagebox.folder_creation_error.message", path=self.ai_chat_history_folder), parent=self.root)
 
 
     def log(self, message):
         # AIChatWindow の log メソッドはUIウィジェットに書き込まないため、
         # 呼び出しタイミングに特に注意は不要。
+        # ただし、渡される message が翻訳済みであることを期待する
         logger.info(message)
 
     def on_closing(self):
@@ -91,7 +96,7 @@ class AIChatWindow:
         chat_panel.pack(side="left", fill="both", expand=True, padx=(5,10), pady=10)
 
         # --- 左側: 会話履歴一覧 ---
-        customtkinter.CTkLabel(history_panel, text="会話履歴", font=(self.default_font[0], self.default_font[1]+2, "bold")).pack(pady=5)
+        customtkinter.CTkLabel(history_panel, text=self._("ai_chat.label.chat_history"), font=(self.default_font[0], self.default_font[1]+2, "bold")).pack(pady=5)
 
         tree_frame = customtkinter.CTkFrame(history_panel) # TreeviewとScrollbarをまとめるフレーム
         tree_frame.pack(fill="both", expand=True, padx=5, pady=(0,5))
@@ -107,8 +112,8 @@ class AIChatWindow:
         # ここでは基本的なフォントとテーマの適用に留める。
 
         self.chat_history_tree = ttk.Treeview(tree_frame, columns=('filename', 'last_updated'), show='headings', style="Treeview")
-        self.chat_history_tree.heading('filename', text='会話ログ')
-        self.chat_history_tree.heading('last_updated', text='最終更新日時')
+        self.chat_history_tree.heading('filename', text=self._("ai_chat.history_tree.header.filename"))
+        self.chat_history_tree.heading('last_updated', text=self._("ai_chat.history_tree.header.last_updated"))
         self.chat_history_tree.column('filename', width=120, stretch=tk.YES)
         self.chat_history_tree.column('last_updated', width=120, stretch=tk.YES)
         self.chat_history_tree.bind('<<TreeviewSelect>>', self.on_chat_history_selected_action)
@@ -122,37 +127,37 @@ class AIChatWindow:
         chat_history_scroll_y.pack(side="right", fill="y")
         self.chat_history_tree.pack(side="left", fill="both", expand=True)
 
-        customtkinter.CTkButton(history_panel, text="新しいチャットを開始", command=self.start_new_ai_chat_session_action, font=self.default_font).pack(side="bottom", fill="x", padx=5, pady=5)
+        customtkinter.CTkButton(history_panel, text=self._("ai_chat.button.start_new_chat"), command=self.start_new_ai_chat_session_action, font=self.default_font).pack(side="bottom", fill="x", padx=5, pady=5)
 
         # --- 右側: 会話エリア ---
         chat_config_frame = customtkinter.CTkFrame(chat_panel, fg_color="transparent")
         chat_config_frame.pack(fill="x", pady=5, padx=5)
 
-        customtkinter.CTkLabel(chat_config_frame, text="AIキャラ:", font=self.default_font).grid(row=0, column=0, padx=2, pady=2, sticky="w")
+        customtkinter.CTkLabel(chat_config_frame, text=self._("ai_chat.label.ai_character"), font=self.default_font).grid(row=0, column=0, padx=2, pady=2, sticky="w")
         self.ai_char_var = tk.StringVar()
         self.ai_char_combo = customtkinter.CTkComboBox(chat_config_frame, variable=self.ai_char_var, state="readonly", width=150, font=self.default_font)
         self.ai_char_combo.grid(row=0, column=1, padx=2, pady=2, sticky="w")
 
-        customtkinter.CTkLabel(chat_config_frame, text="ユーザーキャラ:", font=self.default_font).grid(row=0, column=2, padx=(10,2), pady=2, sticky="w")
+        customtkinter.CTkLabel(chat_config_frame, text=self._("ai_chat.label.user_character"), font=self.default_font).grid(row=0, column=2, padx=(10,2), pady=2, sticky="w")
         self.user_char_var = tk.StringVar()
         self.user_char_combo = customtkinter.CTkComboBox(chat_config_frame, variable=self.user_char_var, state="readonly", width=150, font=self.default_font)
         self.user_char_combo.grid(row=0, column=3, padx=2, pady=2, sticky="w")
 
         self.play_user_speech_var = tk.BooleanVar(value=True)
-        customtkinter.CTkCheckBox(chat_config_frame, text="ユーザー発話再生", variable=self.play_user_speech_var, font=self.default_font).grid(row=0, column=4, padx=10, pady=2, sticky="w")
+        customtkinter.CTkCheckBox(chat_config_frame, text=self._("ai_chat.checkbox.play_user_speech"), variable=self.play_user_speech_var, font=self.default_font).grid(row=0, column=4, padx=10, pady=2, sticky="w")
 
         # 会話内容表示 (LabelFrame -> CTkFrame + CTkLabel)
         chat_display_outer_frame = customtkinter.CTkFrame(chat_panel)
         chat_display_outer_frame.pack(fill="both", expand=True, pady=5, padx=5)
-        customtkinter.CTkLabel(chat_display_outer_frame, text="会話内容", font=(self.default_font[0], self.default_font[1]+1, "bold")).pack(anchor="w", padx=10, pady=(5,0))
+        customtkinter.CTkLabel(chat_display_outer_frame, text=self._("ai_chat.label.chat_content"), font=(self.default_font[0], self.default_font[1]+1, "bold")).pack(anchor="w", padx=10, pady=(5,0))
         chat_display_container = customtkinter.CTkFrame(chat_display_outer_frame)
         chat_display_container.pack(fill="both", expand=True, padx=5, pady=5)
 
         # ttk.Treeview for chat content
         self.chat_content_tree = ttk.Treeview(chat_display_container, columns=('line', 'talker', 'words'), show='headings', style="Treeview")
-        self.chat_content_tree.heading('line', text='行')
-        self.chat_content_tree.heading('talker', text='話者')
-        self.chat_content_tree.heading('words', text='発言内容')
+        self.chat_content_tree.heading('line', text=self._("ai_chat.content_tree.header.line"))
+        self.chat_content_tree.heading('talker', text=self._("ai_chat.content_tree.header.talker"))
+        self.chat_content_tree.heading('words', text=self._("ai_chat.content_tree.header.words"))
         self.chat_content_tree.column('line', width=40, anchor="center", stretch=tk.NO)
         self.chat_content_tree.column('talker', width=100, stretch=tk.NO)
         self.chat_content_tree.column('words', width=350, stretch=tk.YES) # words列が拡張
@@ -170,16 +175,16 @@ class AIChatWindow:
 
         # Context Menu (tk.Menuはそのまま使用)
         self.chat_content_context_menu = tk.Menu(self.chat_content_tree, tearoff=0)
-        self.chat_content_context_menu.add_command(label="選択行を削除", command=self.delete_selected_chat_message_action)
+        self.chat_content_context_menu.add_command(label=self._("ai_chat.context_menu.delete_selected_row"), command=self.delete_selected_chat_message_action)
         self.chat_content_tree.bind("<Button-3>", self._show_chat_content_context_menu)
 
         # 入力エリア
         chat_input_frame = customtkinter.CTkFrame(chat_panel, fg_color="transparent")
         chat_input_frame.pack(fill="x", pady=5, padx=5)
-        self.chat_message_entry = customtkinter.CTkEntry(chat_input_frame, placeholder_text="メッセージを入力...", width=300, font=self.default_font)
+        self.chat_message_entry = customtkinter.CTkEntry(chat_input_frame, placeholder_text=self._("ai_chat.entry.placeholder.message_input"), width=300, font=self.default_font)
         self.chat_message_entry.bind("<Return>", self.send_ai_chat_message_action)
         self.chat_message_entry.pack(side="left", fill="x", expand=True, padx=(0, 5))
-        customtkinter.CTkButton(chat_input_frame, text="送信", command=self.send_ai_chat_message_action, font=self.default_font, width=80).pack(side="left")
+        customtkinter.CTkButton(chat_input_frame, text=self._("ai_chat.button.send"), command=self.send_ai_chat_message_action, font=self.default_font, width=80).pack(side="left")
 
     def _adjust_chat_words_column_width(self, event, treeview_widget):
         other_cols_width = treeview_widget.column('line')['width'] + treeview_widget.column('talker')['width']
@@ -197,9 +202,10 @@ class AIChatWindow:
     def populate_chat_character_dropdowns(self):
         all_chars_data = self.character_manager.get_all_characters()
         char_names = [data.get('name', 'Unknown') for data in all_chars_data.values()]
+        no_char_text = self._("ai_chat.dropdown.no_character")
 
-        self.ai_char_combo.configure(values=char_names if char_names else ["キャラクターなし"])
-        self.user_char_combo.configure(values=char_names if char_names else ["キャラクターなし"])
+        self.ai_char_combo.configure(values=char_names if char_names else [no_char_text])
+        self.user_char_combo.configure(values=char_names if char_names else [no_char_text])
 
         if char_names:
             saved_ai_char = self.config.get_system_setting("ai_chat_default_ai_char_name")
@@ -212,9 +218,9 @@ class AIChatWindow:
             elif len(char_names) > 1 : self.user_char_var.set(char_names[1] if self.ai_char_var.get() == char_names[0] else char_names[0])
             elif char_names : self.user_char_var.set(char_names[0])
         else:
-            self.ai_char_var.set("キャラクターなし")
-            self.user_char_var.set("キャラクターなし")
-        self.log("AIチャット: キャラクタープルダウン更新")
+            self.ai_char_var.set(no_char_text)
+            self.user_char_var.set(no_char_text)
+        self.log(self._("ai_chat.log.character_dropdown_updated"))
 
     def load_chat_history_list(self):
         self.chat_history_tree.delete(*self.chat_history_tree.get_children())
@@ -225,11 +231,11 @@ class AIChatWindow:
                 try:
                     last_mod_dt = datetime.fromtimestamp(item_path.stat().st_mtime)
                     history_files_data.append({"path": item_path, "name": item_path.name, "dt": last_mod_dt, "dt_str": last_mod_dt.strftime('%Y-%m-%d %H:%M')}) # 秒を削除
-                except Exception as e_stat: self.log(f"履歴ファイル情報取得エラー {item_path.name}: {e_stat}")
+                except Exception as e_stat: self.log(self._("ai_chat.log.history_file_stat_error", filename=item_path.name, e_stat=e_stat))
         history_files_data.sort(key=lambda x: x["dt"], reverse=True)
         for entry in history_files_data:
             self.chat_history_tree.insert('', 'end', values=(entry["name"], entry["dt_str"]), iid=str(entry["path"]))
-        self.log(f"AIチャット: 会話履歴一覧更新 ({len(history_files_data)}件)")
+        self.log(self._("ai_chat.log.history_list_updated", count=len(history_files_data)))
 
     def start_new_ai_chat_session_action(self):
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -238,18 +244,18 @@ class AIChatWindow:
         try:
             with open(new_filepath, 'w', newline='', encoding='utf-8') as csvfile:
                 csv.writer(csvfile).writerow(['action', 'talker', 'words'])
-            self.log(f"新規チャットセッションファイル作成: {new_filepath}")
+            self.log(self._("ai_chat.log.new_chat_session_created", filepath=new_filepath))
             self.current_ai_chat_file_path = new_filepath
             self.chat_content_tree.delete(*self.chat_content_tree.get_children())
             self.load_chat_history_list()
             if self.chat_history_tree.exists(str(new_filepath)):
                 self.chat_history_tree.selection_set(str(new_filepath))
                 self.chat_history_tree.focus(str(new_filepath)); self.chat_history_tree.see(str(new_filepath))
-            messagebox.showinfo("新しいチャット", f"新しいチャット '{new_filename}' を開始しました。", parent=self.root)
+            messagebox.showinfo(self._("ai_chat.messagebox.new_chat.title"), self._("ai_chat.messagebox.new_chat.message", filename=new_filename), parent=self.root)
             self.chat_message_entry.focus_set()
         except Exception as e:
-            self.log(f"新規チャットファイル作成エラー: {e}")
-            messagebox.showerror("作成エラー", f"新規チャット作成失敗: {e}", parent=self.root)
+            self.log(self._("ai_chat.log.new_chat_file_creation_error", e=e))
+            messagebox.showerror(self._("ai_chat.messagebox.creation_error.title"), self._("ai_chat.messagebox.new_chat_creation_failed", e=e), parent=self.root)
             self.current_ai_chat_file_path = None
 
     def on_chat_history_selected_action(self, event=None):
@@ -261,7 +267,7 @@ class AIChatWindow:
         self.current_ai_chat_file_path = Path(selected_file_path_str)
         self.chat_content_tree.delete(*self.chat_content_tree.get_children())
         if not self.current_ai_chat_file_path.exists():
-            messagebox.showwarning("ファイルエラー", "選択された履歴ファイルが見つかりません。", parent=self.root)
+            messagebox.showwarning(self._("ai_chat.messagebox.file_error.title"), self._("ai_chat.messagebox.history_file_not_found"), parent=self.root)
             self.current_ai_chat_file_path = None
             self.load_chat_history_list()
             return
@@ -269,24 +275,24 @@ class AIChatWindow:
             with open(self.current_ai_chat_file_path, 'r', encoding='utf-8', newline='') as csvfile:
                 reader = csv.DictReader(csvfile)
                 if reader.fieldnames != ['action', 'talker', 'words']:
-                    messagebox.showerror("形式エラー", "CSVヘッダーが不正です。", parent=self.root)
+                    messagebox.showerror(self._("ai_chat.messagebox.format_error.title"), self._("ai_chat.messagebox.csv_header_invalid"), parent=self.root)
                     return
                 for i, row in enumerate(reader):
                     if row.get('action') == 'talk':
                         self.chat_content_tree.insert('', 'end', values=(i + 1, row['talker'], row['words']), iid=str(i+1))
             if self.chat_content_tree.get_children():
                 self.chat_content_tree.see(self.chat_content_tree.get_children()[-1])
-            self.log(f"チャット履歴読み込み: {self.current_ai_chat_file_path.name}")
+            self.log(self._("ai_chat.log.chat_history_loaded", filename=self.current_ai_chat_file_path.name))
         except Exception as e:
-            messagebox.showerror("読み込みエラー", f"履歴読み込み失敗: {e}", parent=self.root)
-            self.log(f"チャット履歴読み込みエラー: {e}")
+            messagebox.showerror(self._("ai_chat.messagebox.load_error.title"), self._("ai_chat.messagebox.history_load_failed", e=e), parent=self.root)
+            self.log(self._("ai_chat.log.chat_history_load_error", e=e))
 
     def _append_to_current_chat_csv(self, action, talker, words):
         if not self.current_ai_chat_file_path or not self.current_ai_chat_file_path.exists(): return
         try:
             with open(self.current_ai_chat_file_path, 'a', newline='', encoding='utf-8') as csvfile:
                 csv.writer(csvfile).writerow([action, talker, words])
-        except Exception as e: self.log(f"チャットCSV追記エラー: {e}")
+        except Exception as e: self.log(self._("ai_chat.log.csv_append_error", e=e))
 
     def _add_message_to_chat_display_tree(self, talker_display_name, message_content):
         line_num = len(self.chat_content_tree.get_children()) + 1
@@ -297,16 +303,17 @@ class AIChatWindow:
     def send_ai_chat_message_action(self, event=None):
         user_input = self.chat_message_entry.get().strip()
         if not user_input: return
+        no_char_text = self._("ai_chat.dropdown.no_character")
         if not self.current_ai_chat_file_path or not self.current_ai_chat_file_path.exists():
-            if messagebox.askyesno("チャット未開始", "チャットセッションがありません。新規作成しますか？", parent=self.root):
+            if messagebox.askyesno(self._("ai_chat.messagebox.chat_not_started.title"), self._("ai_chat.messagebox.chat_not_started.confirm"), parent=self.root):
                 self.start_new_ai_chat_session_action()
                 if not self.current_ai_chat_file_path: return
             else: return
 
         ai_char_name_selected = self.ai_char_var.get()
         user_char_name_selected = self.user_char_var.get()
-        if not ai_char_name_selected or not user_char_name_selected or "キャラクターなし" in [ai_char_name_selected, user_char_name_selected]:
-            messagebox.showwarning("キャラ未選択", "AIキャラとユーザーキャラを選択してください。", parent=self.root); return
+        if not ai_char_name_selected or not user_char_name_selected or no_char_text in [ai_char_name_selected, user_char_name_selected]:
+            messagebox.showwarning(self._("ai_chat.messagebox.character_not_selected.title"), self._("ai_chat.messagebox.character_not_selected.message"), parent=self.root); return
 
         self._add_message_to_chat_display_tree(f"👤 {user_char_name_selected}", user_input)
         self._append_to_current_chat_csv('talk', user_char_name_selected, user_input)
@@ -327,14 +334,14 @@ class AIChatWindow:
 
     def _generate_and_handle_ai_response(self, user_input_text, ai_char_name, user_char_name_for_history):
         ai_char_id = self.character_manager.get_character_id_by_name(ai_char_name)
-        if not ai_char_id: self.log(f"AIキャラ '{ai_char_name}' ID見つからず"); return
+        if not ai_char_id: self.log(self._("ai_chat.log.ai_char_id_not_found", char_name=ai_char_name)); return
         ai_char_data = self.character_manager.get_character(ai_char_id)
-        if not ai_char_data: self.log(f"AIキャラ '{ai_char_name}' データ見つからず"); return
+        if not ai_char_data: self.log(self._("ai_chat.log.ai_char_data_not_found", char_name=ai_char_name)); return
 
         try:
             api_key = self.config.get_system_setting("google_ai_api_key")
             if not api_key:
-                self.root.after(0, self._add_message_to_chat_display_tree, f"🤖 {ai_char_name}", "Google APIキー未設定")
+                self.root.after(0, self._add_message_to_chat_display_tree, f"🤖 {ai_char_name}", self._("ai_chat.message.google_api_key_not_set"))
                 return
 
             client = genai.Client(api_key=api_key)
@@ -346,12 +353,14 @@ class AIChatWindow:
                     for row in reader:
                         if row.get('action') == 'talk':
                             speaker, msg = row.get('talker'), row.get('words')
+                            # TODO: "あなた" の部分も国際化が必要かもしれないが、プロンプトの一部なので一旦保留
                             prefix = "あなた" if speaker == ai_char_name else user_char_name_for_history
                             chat_history_for_prompt.append(f"{prefix}: {msg}")
             history_str = "\n".join(chat_history_for_prompt[-10:])
+            # TODO: プロンプト内の固定文字列も国際化検討
             full_prompt = f"{ai_prompt}\n\n以下はこれまでの会話です:\n{history_str}\n\n{user_char_name_for_history}: {user_input_text}\n\nあなた ({ai_char_name}):"
             text_gen_model = self.config.get_system_setting("text_generation_model", "gemini-1.5-flash")
-            ai_response_text = "エラー：応答取得失敗" # デフォルトのエラーメッセージ
+            ai_response_text = self._("ai_chat.message.error_getting_response") # デフォルトのエラーメッセージ
 
             # ログ記録: AIへのリクエスト
             self.communication_logger.add_log("sent", "text_generation", f"[AI Chat to {ai_char_name} (Model: {text_gen_model})]\n{full_prompt}")
@@ -359,7 +368,7 @@ class AIChatWindow:
             if text_gen_model == "local_lm_studio":
                 local_llm_url = self.config.get_system_setting("local_llm_endpoint_url")
                 if not local_llm_url:
-                    ai_response_text = "ローカルLLMエンドポイントURL未設定"
+                    ai_response_text = self._("ai_chat.message.local_llm_url_not_set")
                 else:
                     loop = asyncio.new_event_loop(); asyncio.set_event_loop(loop)
                     try:
@@ -369,7 +378,7 @@ class AIChatWindow:
             else:
                 gemini_response = client.models.generate_content(model=text_gen_model, contents=full_prompt,
                                                                generation_config=genai_types.GenerateContentConfig(temperature=0.8, max_output_tokens=200))
-                ai_response_text = gemini_response.text.strip() if gemini_response.text else "うーん、ちょっとうまく答えられないみたいです。"
+                ai_response_text = gemini_response.text.strip() if gemini_response.text else self._("ai_chat.message.ai_generic_error_response")
 
             # ログ記録: AIからのレスポンス
             self.communication_logger.add_log("received", "text_generation", f"[AI Chat from {ai_char_name} (Model: {text_gen_model})]\n{ai_response_text}")
@@ -379,12 +388,12 @@ class AIChatWindow:
             self._play_character_speech_async(ai_char_name, ai_response_text) # この中で音声合成ログが記録される
 
         except genai_types.BlockedPromptException as e_block:
-            ai_response_text = "その内容についてはお答えできません。"
+            ai_response_text = self._("ai_chat.message.ai_blocked_response")
             self.communication_logger.add_log("received", "text_generation", f"[AI Chat from {ai_char_name} (Model: {text_gen_model}) - Blocked]\n{str(e_block)}")
             self.root.after(0, self._add_message_to_chat_display_tree, f"🤖 {ai_char_name}", ai_response_text)
         except Exception as e_gen:
-            ai_response_text = "ごめんなさい、ちょっと調子が悪いです。" # エラー時のレスポンスを更新
-            self.log(f"AI応答生成エラー: {e_gen}")
+            ai_response_text = self._("ai_chat.message.ai_system_error_response") # エラー時のレスポンスを更新
+            self.log(self._("ai_chat.log.ai_response_generation_error", e_gen=e_gen))
             self.communication_logger.add_log("received", "text_generation", f"[AI Chat from {ai_char_name} (Model: {text_gen_model}) - Error]\n{str(e_gen)}")
             self.root.after(0, self._add_message_to_chat_display_tree, f"🤖 {ai_char_name}", ai_response_text)
 
@@ -401,16 +410,16 @@ class AIChatWindow:
                     data = json.loads(resp_text) # jsonをインポート
                     if data.get("choices") and data["choices"][0].get("message"):
                         return data["choices"][0]["message"].get("content", "").strip()
-            return "ローカルLLM応答形式エラー(詳細不明)"
+            return self._("ai_chat.message.local_llm_response_format_error")
         except Exception as e_llm:
-            self.log(f"ローカルLLM呼び出しエラー ({char_name}, {endpoint_url}): {e_llm}")
-            return f"ローカルLLM呼び出しエラー: {e_llm}"
+            self.log(self._("ai_chat.log.local_llm_call_error", char_name=char_name, endpoint_url=endpoint_url, e_llm=e_llm))
+            return self._("ai_chat.message.local_llm_call_error", e_llm=e_llm)
 
     def _play_character_speech_async(self, char_name, text, block=False):
         char_id = self.character_manager.get_character_id_by_name(char_name)
-        if not char_id: self.log(f"音声再生エラー: キャラ '{char_name}' IDなし"); return
+        if not char_id: self.log(self._("ai_chat.log.audio_play_char_id_not_found", char_name=char_name)); return
         char_data = self.character_manager.get_character(char_id)
-        if not char_data: self.log(f"音声再生エラー: キャラ '{char_name}' データなし"); return
+        if not char_data: self.log(self._("ai_chat.log.audio_play_char_data_not_found", char_name=char_name)); return
 
         voice_settings = char_data.get('voice_settings', {})
         engine = voice_settings.get('engine', self.config.get_system_setting("voice_engine"))
@@ -429,8 +438,8 @@ class AIChatWindow:
                 )
                 if audio_files:
                     loop.run_until_complete(self.audio_player.play_audio_files(audio_files))
-                else: self.log(f"音声合成失敗 ({char_name}: '{text[:20]}...')")
-            except Exception as e_play: self.log(f"音声再生処理エラー ({char_name}): {e_play}")
+                else: self.log(self._("ai_chat.log.audio_synthesis_failed", char_name=char_name, text_preview=text[:20]))
+            except Exception as e_play: self.log(self._("ai_chat.log.audio_playback_error", char_name=char_name, e_play=e_play))
             finally: loop.close()
 
         if block:
@@ -440,16 +449,19 @@ class AIChatWindow:
 
     def delete_selected_chat_message_action(self):
         selected_items = self.chat_content_tree.selection()
-        if not selected_items: messagebox.showwarning("削除エラー", "削除する行を選択してください。", parent=self.root); return
+        if not selected_items: messagebox.showwarning(self._("ai_chat.messagebox.delete_error.title"), self._("ai_chat.messagebox.select_row_to_delete"), parent=self.root); return
         selected_tree_iid = selected_items[0]
         try:
             line_num_in_tree = int(selected_tree_iid)
             values = self.chat_content_tree.item(selected_tree_iid, 'values')
             talker_preview, words_preview = values[1], values[2][:20]
-            if not messagebox.askyesno("削除確認", f"行 {line_num_in_tree} ({talker_preview}: \"{words_preview}...\") を削除しますか？\nファイルからも削除され元に戻せません。", parent=self.root): return
+            if not messagebox.askyesno(
+                self._("ai_chat.messagebox.delete_confirm.title"),
+                self._("ai_chat.messagebox.delete_confirm.message", line_num=line_num_in_tree, talker=talker_preview, words_preview=words_preview),
+                parent=self.root): return
 
             if not self.current_ai_chat_file_path or not self.current_ai_chat_file_path.exists():
-                messagebox.showerror("ファイルエラー", "チャット履歴ファイルが見つかりません。", parent=self.root); return
+                messagebox.showerror(self._("ai_chat.messagebox.file_error.title"), self._("ai_chat.messagebox.chat_history_file_not_found_on_delete"), parent=self.root); return
 
             temp_lines = []
             deleted_from_csv = False
@@ -469,15 +481,15 @@ class AIChatWindow:
             if deleted_from_csv:
                 with open(self.current_ai_chat_file_path, 'w', newline='', encoding='utf-8') as csvfile:
                     csv.writer(csvfile).writerows(temp_lines)
-                self.log(f"チャット行削除: ファイル {self.current_ai_chat_file_path.name} から TreeView行 {line_num_in_tree} に対応するデータを削除")
-                self.on_chat_history_selected_action()
-                messagebox.showinfo("削除完了", "選択行を削除しました。", parent=self.root)
+                self.log(self._("ai_chat.log.chat_row_deleted", filename=self.current_ai_chat_file_path.name, line_num=line_num_in_tree))
+                self.on_chat_history_selected_action() # Reload and refresh display
+                messagebox.showinfo(self._("ai_chat.messagebox.delete_complete.title"), self._("ai_chat.messagebox.delete_complete.message"), parent=self.root)
             else:
-                messagebox.showerror("削除エラー", "CSVファイル内で対応する行が見つかりませんでした。", parent=self.root)
-        except ValueError: messagebox.showerror("削除エラー", "行番号が無効です。", parent=self.root)
+                messagebox.showerror(self._("ai_chat.messagebox.delete_error.title"), self._("ai_chat.messagebox.delete_row_not_found_in_csv"), parent=self.root)
+        except ValueError: messagebox.showerror(self._("ai_chat.messagebox.delete_error.title"), self._("ai_chat.messagebox.invalid_row_number"), parent=self.root)
         except Exception as e_del:
-            self.log(f"チャット行削除エラー: {e_del}")
-            messagebox.showerror("削除エラー", f"予期せぬエラー: {e_del}", parent=self.root)
+            self.log(self._("ai_chat.log.chat_row_delete_error", e_del=e_del))
+            messagebox.showerror(self._("ai_chat.messagebox.delete_error.title"), self._("ai_chat.messagebox.unexpected_error_on_delete", e_del=e_del), parent=self.root)
 
 def main():
     # customtkinterの初期設定
