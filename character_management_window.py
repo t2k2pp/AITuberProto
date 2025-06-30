@@ -15,11 +15,15 @@ from character_manager import CharacterManager
 from audio_manager import VoiceEngineManager, AudioPlayer, GoogleAIStudioNewVoiceAPI, AvisSpeechEngineAPI, VOICEVOXEngineAPI, SystemTTSAPI
 
 import logging
+import i18n_setup # 国際化対応
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
 class CharacterEditDialog:
     def __init__(self, parent, character_manager, char_id=None, char_data=None, config_manager=None):
+        i18n_setup.init_i18n() # 国際化設定の強制再初期化
+        self._ = i18n_setup.get_translator() # 最新翻訳関数の取得
+
         self.parent = parent
         self.character_manager = character_manager
         self.char_id = char_id
@@ -37,8 +41,8 @@ class CharacterEditDialog:
 
         # tk.Toplevel -> customtkinter.CTkToplevel
         self.dialog = customtkinter.CTkToplevel(parent)
-        title = "キャラクター編集" if self.is_edit_mode else "キャラクター作成"
-        self.dialog.title(title + " - CTk版")
+        title_key = "character_edit_dialog.title.edit" if self.is_edit_mode else "character_edit_dialog.title.create"
+        self.dialog.title(self._(title_key)) #  + self._("character_edit_dialog.title.suffix_ctk") - CTk版サフィックスは削除
         self.dialog.geometry("700x850") # 少し大きめに
         self.dialog.transient(parent)
         self.dialog.grab_set()
@@ -61,123 +65,209 @@ class CharacterEditDialog:
     def create_widgets(self, dialog_frame: customtkinter.CTkFrame): # 引数に親フレームを受け取る
         # CharacterEditDialog のウィジェット作成は変更なし
         # キャラクター名
-        customtkinter.CTkLabel(dialog_frame, text="キャラクター名:", font=self.label_font).pack(anchor="w", padx=10, pady=(10,2))
+        customtkinter.CTkLabel(dialog_frame, text=self._("character_edit_dialog.label.name"), font=self.label_font).pack(anchor="w", padx=10, pady=(10,2))
         self.name_var = tk.StringVar()
         customtkinter.CTkEntry(dialog_frame, textvariable=self.name_var, width=300, font=self.default_font).pack(anchor="w", padx=10, pady=(0,10))
 
         if not self.is_edit_mode:
             template_outer_frame = customtkinter.CTkFrame(dialog_frame)
             template_outer_frame.pack(fill="x", padx=10, pady=10)
-            customtkinter.CTkLabel(template_outer_frame, text="テンプレート選択（4エンジン対応）", font=self.label_font).pack(anchor="w", padx=10, pady=(5,0))
+            customtkinter.CTkLabel(template_outer_frame, text=self._("character_edit_dialog.label.template_selection"), font=self.label_font).pack(anchor="w", padx=10, pady=(5,0))
             template_frame = customtkinter.CTkFrame(template_outer_frame)
             template_frame.pack(fill="x", padx=10, pady=5)
 
-            self.template_var = tk.StringVar(value="最新AI系")
-            templates = ["最新AI系", "元気系", "知的系", "癒し系", "ずんだもん系", "キャラクター系", "プロ品質系", "多言語対応系", "カスタム"]
+            # テンプレートの表示名は翻訳し、valueは元の日本語を維持（on_template_changedでの比較のため）
+            self.template_var = tk.StringVar(value="最新AI系") # 初期値は日本語のまま
+            templates_display = {
+                "最新AI系": self._("character_edit_dialog.template.latest_ai"),
+                "元気系": self._("character_edit_dialog.template.energetic"),
+                "知的系": self._("character_edit_dialog.template.intelligent"),
+                "癒し系": self._("character_edit_dialog.template.healing"),
+                "ずんだもん系": self._("character_edit_dialog.template.zundamon"),
+                "キャラクター系": self._("character_edit_dialog.template.character_type"),
+                "プロ品質系": self._("character_edit_dialog.template.pro_quality"),
+                "多言語対応系": self._("character_edit_dialog.template.multilingual"),
+                "カスタム": self._("character_edit_dialog.template.custom")
+            }
+            template_values = list(templates_display.keys()) # valueは日本語キー
+
             template_grid = customtkinter.CTkFrame(template_frame, fg_color="transparent")
             template_grid.pack(fill="x")
-            for i, template in enumerate(templates):
+            for i, template_key in enumerate(template_values):
                 row, col = divmod(i, 2)
-                rb = customtkinter.CTkRadioButton(template_grid, text=template, variable=self.template_var, value=template, command=self.on_template_changed, font=self.default_font)
+                rb = customtkinter.CTkRadioButton(template_grid, text=templates_display[template_key], variable=self.template_var, value=template_key, command=self.on_template_changed, font=self.default_font)
                 rb.grid(row=row, column=col, sticky="w", padx=10, pady=3)
 
         personality_outer_frame = customtkinter.CTkFrame(dialog_frame)
         personality_outer_frame.pack(fill="x", padx=10, pady=10)
-        customtkinter.CTkLabel(personality_outer_frame, text="性格設定（詳細）", font=self.label_font).pack(anchor="w", padx=10, pady=(5,0))
+        customtkinter.CTkLabel(personality_outer_frame, text=self._("character_edit_dialog.label.personality_settings"), font=self.label_font).pack(anchor="w", padx=10, pady=(5,0))
         personality_frame = customtkinter.CTkFrame(personality_outer_frame)
         personality_frame.pack(fill="x", padx=10, pady=5)
 
-        customtkinter.CTkLabel(personality_frame, text="基本的な性格:", font=self.default_font).pack(anchor="w", pady=(5,0))
+        customtkinter.CTkLabel(personality_frame, text=self._("character_edit_dialog.label.base_tone"), font=self.default_font).pack(anchor="w", pady=(5,0))
         self.base_tone_var = tk.StringVar()
         customtkinter.CTkEntry(personality_frame, textvariable=self.base_tone_var, width=580, font=self.default_font).pack(fill="x", pady=2)
-        customtkinter.CTkLabel(personality_frame, text="話し方・口調:", font=self.default_font).pack(anchor="w", pady=(10,0))
+        customtkinter.CTkLabel(personality_frame, text=self._("character_edit_dialog.label.speech_style"), font=self.default_font).pack(anchor="w", pady=(10,0))
         self.speech_style_var = tk.StringVar()
         customtkinter.CTkEntry(personality_frame, textvariable=self.speech_style_var, width=580, font=self.default_font).pack(fill="x", pady=2)
 
-        customtkinter.CTkLabel(personality_frame, text="キャラクターの特徴 (1行1項目):", font=self.default_font).pack(anchor="w", pady=(10,0))
+        customtkinter.CTkLabel(personality_frame, text=self._("character_edit_dialog.label.character_traits"), font=self.default_font).pack(anchor="w", pady=(10,0))
         self.traits_text = customtkinter.CTkTextbox(personality_frame, height=100, width=580, font=self.default_font) # CTkTextbox
         self.traits_text.pack(fill="x", pady=2)
-        customtkinter.CTkLabel(personality_frame, text="好きな話題 (1行1項目):", font=self.default_font).pack(anchor="w", pady=(10,0))
+        customtkinter.CTkLabel(personality_frame, text=self._("character_edit_dialog.label.favorite_topics"), font=self.default_font).pack(anchor="w", pady=(10,0))
         self.topics_text = customtkinter.CTkTextbox(personality_frame, height=100, width=580, font=self.default_font) # CTkTextbox
         self.topics_text.pack(fill="x", pady=2)
 
         voice_outer_frame = customtkinter.CTkFrame(dialog_frame)
         voice_outer_frame.pack(fill="x", padx=10, pady=10)
-        customtkinter.CTkLabel(voice_outer_frame, text="音声設定（4エンジン完全対応）", font=self.label_font).pack(anchor="w", padx=10, pady=(5,0))
+        customtkinter.CTkLabel(voice_outer_frame, text=self._("character_edit_dialog.label.voice_settings"), font=self.label_font).pack(anchor="w", padx=10, pady=(5,0))
         voice_frame = customtkinter.CTkFrame(voice_outer_frame)
         voice_frame.pack(fill="x", padx=10, pady=5)
 
-        customtkinter.CTkLabel(voice_frame, text="音声エンジン:", font=self.default_font).pack(anchor="w")
-        self.voice_engine_var = tk.StringVar(value="google_ai_studio_new")
+        customtkinter.CTkLabel(voice_frame, text=self._("character_edit_dialog.label.voice_engine"), font=self.default_font).pack(anchor="w")
+        self.voice_engine_var = tk.StringVar(value="google_ai_studio_new") # valueは内部キーなのでそのまま
         engine_combo = customtkinter.CTkComboBox(voice_frame, variable=self.voice_engine_var,
-                                   values=["google_ai_studio_new", "avis_speech", "voicevox", "system_tts"],
-                                   state="readonly", width=580, font=self.default_font, command=self.on_engine_changed) # commandでコールバック
+                                   values=["google_ai_studio_new", "avis_speech", "voicevox", "system_tts"], # valueは内部キー
+                                   state="readonly", width=580, font=self.default_font, command=self.on_engine_changed)
         engine_combo.pack(fill="x", pady=2)
-        self.engine_info_label = customtkinter.CTkLabel(voice_frame, text="", text_color="gray", wraplength=500, font=self.default_font)
+        self.engine_info_label = customtkinter.CTkLabel(voice_frame, text="", text_color="gray", wraplength=500, font=self.default_font) # on_engine_changedで更新
         self.engine_info_label.pack(anchor="w", pady=2)
 
-        customtkinter.CTkLabel(voice_frame, text="音声モデル:", font=self.default_font).pack(anchor="w", pady=(10,0))
+        customtkinter.CTkLabel(voice_frame, text=self._("character_edit_dialog.label.voice_model"), font=self.default_font).pack(anchor="w", pady=(10,0))
         self.voice_var = tk.StringVar()
-        self.voice_combo = customtkinter.CTkComboBox(voice_frame, variable=self.voice_var, state="readonly", width=580, font=self.default_font)
+        self.voice_combo = customtkinter.CTkComboBox(voice_frame, variable=self.voice_var, state="readonly", width=580, font=self.default_font) # update_voice_modelsで更新
         self.voice_combo.pack(fill="x", pady=2)
 
         speed_frame_inner = customtkinter.CTkFrame(voice_frame, fg_color="transparent")
         speed_frame_inner.pack(fill="x", pady=(10,0))
-        customtkinter.CTkLabel(speed_frame_inner, text="音声速度:", font=self.default_font).pack(side="left", padx=(0,10))
+        customtkinter.CTkLabel(speed_frame_inner, text=self._("character_edit_dialog.label.speech_speed"), font=self.default_font).pack(side="left", padx=(0,10))
         self.speed_var = tk.DoubleVar(value=1.0)
-        # ttk.Scale -> customtkinter.CTkSlider
         speed_slider = customtkinter.CTkSlider(speed_frame_inner, from_=0.5, to=2.0, variable=self.speed_var, width=300, command=lambda val: self.speed_label.configure(text=f"{val:.1f}"))
         speed_slider.pack(side="left", padx=10)
         self.speed_label = customtkinter.CTkLabel(speed_frame_inner, text="1.0", font=self.default_font)
         self.speed_label.pack(side="left", padx=5)
-        # CTkSliderのcommandでラベル更新するのでtraceは不要に
 
         quality_frame_inner = customtkinter.CTkFrame(voice_frame, fg_color="transparent")
         quality_frame_inner.pack(fill="x", pady=5)
-        customtkinter.CTkLabel(quality_frame_inner, text="音声品質:", font=self.default_font).pack(side="left", padx=(0,10))
-        self.quality_var = tk.StringVar(value="標準")
+        customtkinter.CTkLabel(quality_frame_inner, text=self._("character_edit_dialog.label.speech_quality"), font=self.default_font).pack(side="left", padx=(0,10))
+        self.quality_var = tk.StringVar(value="標準") # valueは内部キーなのでそのまま
+        quality_values_map = {"標準": self._("character_edit_dialog.quality.standard"), "高品質": self._("character_edit_dialog.quality.high")}
         quality_combo = customtkinter.CTkComboBox(quality_frame_inner, variable=self.quality_var,
-                                    values=["標準", "高品質"], state="readonly", width=150, font=self.default_font)
-        quality_combo.pack(side="left", padx=10)
-        self.update_voice_models()
+                                    values=list(quality_values_map.values()), # 表示は翻訳後
+                                    state="readonly", width=150, font=self.default_font)
+        # quality_varとComboBoxのvalueが異なるため、選択時に内部キーに変換する処理が必要になるが、今回はStringVarの値をそのまま使う
+        # そのため、valuesも内部キーのままにして、表示は別途更新するか、StringVarに翻訳後の値をセットする必要がある。
+        # ここではStringVarの値を内部キーとして扱い、表示は翻訳しない方針で一度進め、問題あれば修正する。
+        # → やはり表示と内部値を分ける。StringVarには内部キー、ComboBoxのvaluesには表示名。
+        # ただし、CTkComboBoxはvaluesを直接変更できないため、set_quality_optionsのようなメソッドを作るか、
+        # __init__時に翻訳したリストを渡す必要がある。
+        # 今回は元の実装に合わせて、StringVarには内部的な値 "標準" "高品質" を保持し、
+        # ComboBoxのvaluesには翻訳されたものを表示するが、選択された値の取得はStringVarから行う。
+        # そのため、ComboBoxのvaluesは表示用であり、選択された実際の値はStringVarが持つ内部値となる。
+        # これにより、load_existing_dataでのセットやsave_characterでの保存は変更不要。
+        # ただし、ComboBoxの初期表示とStringVarの初期値が一致している必要がある。
+        # self.quality_var.set(self._("character_edit_dialog.quality.standard")) のように初期値を翻訳後のものにするか、
+        # ComboBoxのvaluesに内部キーを渡し、textに翻訳関数を適用するような仕組みがあれば良いが、CTkにはない。
+        # 簡潔にするため、valuesには内部キーを保持し、UI表示は英語圏ユーザーには英語の内部キーが見える形とするか、
+        # __init__で翻訳したリストを生成して渡す。後者を採用。
+        self.translated_quality_values = [self._("character_edit_dialog.quality.standard"), self._("character_edit_dialog.quality.high")]
+        self.internal_quality_keys = ["標準", "高品質"] # 内部的なキー
+
+        # quality_var の初期値は内部キー
+        self.quality_var = tk.StringVar(value=self.internal_quality_keys[0]) # "標準"
+
+        # ComboBoxの表示は翻訳された値、選択時にStringVarに内部キーをセットするコマンド
+        def on_quality_select(choice):
+            try:
+                selected_index = self.translated_quality_values.index(choice)
+                self.quality_var.set(self.internal_quality_keys[selected_index])
+            except ValueError:
+                pass # 翻訳された値が見つからない場合は何もしない
+
+        quality_combo = customtkinter.CTkComboBox(quality_frame_inner,
+                                    values=self.translated_quality_values, # 表示は翻訳後
+                                    state="readonly", width=150, font=self.default_font,
+                                    variable=tk.StringVar(value=self.translated_quality_values[self.internal_quality_keys.index(self.quality_var.get())]), # 初期表示
+                                    command=on_quality_select)
+        self.quality_combo_widget = quality_combo # インスタンス変数として保存
+        self.quality_combo_widget.pack(side="left", padx=10)
+        self.update_voice_models() # ここでエンジン情報ラベルも更新される
 
         response_outer_frame = customtkinter.CTkFrame(dialog_frame)
         response_outer_frame.pack(fill="x", padx=10, pady=10)
-        customtkinter.CTkLabel(response_outer_frame, text="応答設定", font=self.label_font).pack(anchor="w", padx=10, pady=(5,0))
+        customtkinter.CTkLabel(response_outer_frame, text=self._("character_edit_dialog.label.response_settings"), font=self.label_font).pack(anchor="w", padx=10, pady=(5,0))
         response_frame = customtkinter.CTkFrame(response_outer_frame)
         response_frame.pack(fill="x", padx=10, pady=5)
 
         resp_grid = customtkinter.CTkFrame(response_frame, fg_color="transparent")
         resp_grid.pack(fill="x")
-        customtkinter.CTkLabel(resp_grid, text="応答長さ:", font=self.default_font).grid(row=0, column=0, sticky="w", padx=5, pady=5)
-        self.response_length_var = tk.StringVar(value="1-2文程度")
-        length_combo = customtkinter.CTkComboBox(resp_grid, variable=self.response_length_var,
-                                   values=["1文程度", "1-2文程度", "2-3文程度", "3-4文程度"], state="readonly", font=self.default_font, width=150)
-        length_combo.grid(row=0, column=1, padx=10, pady=5, sticky="w")
-        customtkinter.CTkLabel(resp_grid, text="絵文字使用:", font=self.default_font).grid(row=0, column=2, sticky="w", padx=(20,0), pady=5)
-        self.emoji_var = tk.BooleanVar(value=True)
-        customtkinter.CTkCheckBox(resp_grid, variable=self.emoji_var, text="", font=self.default_font).grid(row=0, column=3, padx=5, pady=5) # text=""
+        customtkinter.CTkLabel(resp_grid, text=self._("character_edit_dialog.label.response_length"), font=self.default_font).grid(row=0, column=0, sticky="w", padx=5, pady=5)
+        # 応答長さも品質と同様の対応
+        self.internal_response_length_keys = ["1文程度", "1-2文程度", "2-3文程度", "3-4文程度"]
+        self.translated_response_length_values = [
+            self._("character_edit_dialog.response_length.one_sentence"),
+            self._("character_edit_dialog.response_length.one_to_two_sentences"),
+            self._("character_edit_dialog.response_length.two_to_three_sentences"),
+            self._("character_edit_dialog.response_length.three_to_four_sentences")
+        ]
+        self.response_length_var = tk.StringVar(value=self.internal_response_length_keys[1]) # "1-2文程度"
 
-        customtkinter.CTkLabel(resp_grid, text="感情レベル:", font=self.default_font).grid(row=1, column=0, sticky="w", padx=5, pady=5)
-        self.emotion_var = tk.StringVar(value="普通")
-        emotion_combo = customtkinter.CTkComboBox(resp_grid, variable=self.emotion_var,
-                                    values=["控えめ", "普通", "高め", "超高め"], state="readonly", font=self.default_font, width=150)
-        emotion_combo.grid(row=1, column=1, padx=10, pady=5, sticky="w")
+        def on_length_select(choice):
+            try:
+                selected_index = self.translated_response_length_values.index(choice)
+                self.response_length_var.set(self.internal_response_length_keys[selected_index])
+            except ValueError:
+                pass
+
+        length_combo = customtkinter.CTkComboBox(resp_grid,
+                                   values=self.translated_response_length_values, state="readonly", font=self.default_font, width=150,
+                                   variable=tk.StringVar(value=self.translated_response_length_values[self.internal_response_length_keys.index(self.response_length_var.get())]),
+                                   command=on_length_select)
+        self.length_combo_widget = length_combo # インスタンス変数として保存
+        self.length_combo_widget.grid(row=0, column=1, padx=10, pady=5, sticky="w")
+
+        customtkinter.CTkLabel(resp_grid, text=self._("character_edit_dialog.label.use_emojis"), font=self.default_font).grid(row=0, column=2, sticky="w", padx=(20,0), pady=5)
+        self.emoji_var = tk.BooleanVar(value=True)
+        customtkinter.CTkCheckBox(resp_grid, variable=self.emoji_var, text="", font=self.default_font).grid(row=0, column=3, padx=5, pady=5)
+
+        customtkinter.CTkLabel(resp_grid, text=self._("character_edit_dialog.label.emotion_level"), font=self.default_font).grid(row=1, column=0, sticky="w", padx=5, pady=5)
+        # 感情レベルも同様の対応
+        self.internal_emotion_level_keys = ["控えめ", "普通", "高め", "超高め"]
+        self.translated_emotion_level_values = [
+            self._("character_edit_dialog.emotion_level.subtle"),
+            self._("character_edit_dialog.emotion_level.normal"),
+            self._("character_edit_dialog.emotion_level.high"),
+            self._("character_edit_dialog.emotion_level.very_high")
+        ]
+        self.emotion_var = tk.StringVar(value=self.internal_emotion_level_keys[1]) # "普通"
+
+        def on_emotion_select(choice):
+            try:
+                selected_index = self.translated_emotion_level_values.index(choice)
+                self.emotion_var.set(self.internal_emotion_level_keys[selected_index])
+            except ValueError:
+                pass
+
+        emotion_combo = customtkinter.CTkComboBox(resp_grid,
+                                    values=self.translated_emotion_level_values, state="readonly", font=self.default_font, width=150,
+                                    variable=tk.StringVar(value=self.translated_emotion_level_values[self.internal_emotion_level_keys.index(self.emotion_var.get())]),
+                                    command=on_emotion_select)
+        self.emotion_combo_widget = emotion_combo # インスタンス変数として保存
+        self.emotion_combo_widget.grid(row=1, column=1, padx=10, pady=5, sticky="w")
 
         button_frame_bottom = customtkinter.CTkFrame(dialog_frame, fg_color="transparent")
         button_frame_bottom.pack(fill="x", padx=10, pady=20)
-        button_text = "更新" if self.is_edit_mode else "作成"
+        button_text_key = "character_edit_dialog.button.update" if self.is_edit_mode else "character_edit_dialog.button.create"
 
-        # ボタンを右寄せにするために新しいフレームを作る
         action_buttons_frame = customtkinter.CTkFrame(button_frame_bottom, fg_color="transparent")
         action_buttons_frame.pack(side="right")
-        customtkinter.CTkButton(action_buttons_frame, text=button_text, command=self.save_character, font=self.default_font).pack(side="left", padx=5)
-        customtkinter.CTkButton(action_buttons_frame, text="キャンセル", command=self.dialog.destroy, font=self.default_font).pack(side="left", padx=5)
+        customtkinter.CTkButton(action_buttons_frame, text=self._(button_text_key), command=self.save_character, font=self.default_font).pack(side="left", padx=5)
+        customtkinter.CTkButton(action_buttons_frame, text=self._("character_edit_dialog.button.cancel"), command=self.dialog.destroy, font=self.default_font).pack(side="left", padx=5)
 
         test_buttons_frame = customtkinter.CTkFrame(button_frame_bottom, fg_color="transparent")
         test_buttons_frame.pack(side="left")
-        customtkinter.CTkButton(test_buttons_frame, text="🎤 音声テスト", command=self.test_voice, font=self.default_font).pack(side="left", padx=5)
-        customtkinter.CTkButton(test_buttons_frame, text="🔄 エンジン比較", command=self.compare_voice_engines, font=self.default_font).pack(side="left", padx=5)
+        customtkinter.CTkButton(test_buttons_frame, text=self._("character_edit_dialog.button.test_voice"), command=self.test_voice, font=self.default_font).pack(side="left", padx=5)
+        customtkinter.CTkButton(test_buttons_frame, text=self._("character_edit_dialog.button.compare_engines"), command=self.compare_voice_engines, font=self.default_font).pack(side="left", padx=5)
 
     def load_existing_data(self):
         if not self.char_data: return
@@ -199,26 +289,53 @@ class CharacterEditDialog:
         elif self.voice_combo.cget("values"):
              self.voice_var.set(self.voice_combo.cget("values")[0])
         self.speed_var.set(voice_settings.get('speed', 1.0))
-        self.quality_var.set(voice_settings.get('quality', '標準'))
+
+        # 品質設定の読み込み
+        saved_quality_key = voice_settings.get('quality', self.internal_quality_keys[0])
+        self.quality_var.set(saved_quality_key)
+        if hasattr(self, 'quality_combo_widget') and saved_quality_key in self.internal_quality_keys:
+             self.quality_combo_widget.set(self.translated_quality_values[self.internal_quality_keys.index(saved_quality_key)])
 
         response_settings = self.char_data.get('response_settings', {})
-        self.response_length_var.set(response_settings.get('max_length', '1-2文程度'))
+        # 応答長さ設定の読み込み
+        saved_length_key = response_settings.get('max_length', self.internal_response_length_keys[1])
+        self.response_length_var.set(saved_length_key)
+        if hasattr(self, 'length_combo_widget') and saved_length_key in self.internal_response_length_keys:
+            self.length_combo_widget.set(self.translated_response_length_values[self.internal_response_length_keys.index(saved_length_key)])
+
         self.emoji_var.set(response_settings.get('use_emojis', True))
-        self.emotion_var.set(response_settings.get('emotion_level', '普通'))
+
+        # 感情レベル設定の読み込み
+        saved_emotion_key = response_settings.get('emotion_level', self.internal_emotion_level_keys[1])
+        self.emotion_var.set(saved_emotion_key)
+        if hasattr(self, 'emotion_combo_widget') and saved_emotion_key in self.internal_emotion_level_keys:
+            self.emotion_combo_widget.set(self.translated_emotion_level_values[self.internal_emotion_level_keys.index(saved_emotion_key)])
+
+    # _find_widget_by_class は不要になったので削除
 
     def on_template_changed(self, event=None): # CTkRadioButtonのcommandはeventを渡さない
-        selected_template_name = self.template_var.get()
-        if selected_template_name == "カスタム":
+        selected_template_name = self.template_var.get() # ここは内部キー(日本語)のまま
+        if selected_template_name == "カスタム": # 内部キーで比較
             self.base_tone_var.set(""); self.speech_style_var.set("")
             self.traits_text.delete("1.0", "end"); self.topics_text.delete("1.0", "end")
             self.voice_engine_var.set("google_ai_studio_new"); self.update_voice_models()
-            self.speed_var.set(1.0); self.quality_var.set("標準")
-            self.response_length_var.set("1-2文程度"); self.emoji_var.set(True); self.emotion_var.set("普通")
+            self.speed_var.set(1.0)
+
+            self.quality_var.set(self.internal_quality_keys[0]) # "標準"
+            if hasattr(self, 'quality_combo_widget'): self.quality_combo_widget.set(self.translated_quality_values[0])
+
+            self.response_length_var.set(self.internal_response_length_keys[1]) # "1-2文程度"
+            if hasattr(self, 'length_combo_widget'): self.length_combo_widget.set(self.translated_response_length_values[1])
+
+            self.emoji_var.set(True)
+            self.emotion_var.set(self.internal_emotion_level_keys[1]) # "普通"
+            if hasattr(self, 'emotion_combo_widget'): self.emotion_combo_widget.set(self.translated_emotion_level_values[1])
             return
 
         template_data = self.character_manager.character_templates.get(selected_template_name)
         if not template_data: return
 
+        # テンプレート適用時も同様に StringVar と ComboBox表示を更新
         personality = template_data.get("personality", {})
         self.base_tone_var.set(personality.get("base_tone", ""))
         self.speech_style_var.set(personality.get("speech_style", ""))
@@ -232,12 +349,23 @@ class CharacterEditDialog:
         if selected_model and selected_model in self.voice_combo.cget("values"): self.voice_var.set(selected_model)
         elif self.voice_combo.cget("values"): self.voice_var.set(self.voice_combo.cget("values")[0])
         self.speed_var.set(voice_settings.get("speed", 1.0))
-        self.quality_var.set(voice_settings.get("quality", "標準"))
+
+        template_quality_key = voice_settings.get("quality", self.internal_quality_keys[0])
+        self.quality_var.set(template_quality_key)
+        if hasattr(self, 'quality_combo_widget') and template_quality_key in self.internal_quality_keys:
+             self.quality_combo_widget.set(self.translated_quality_values[self.internal_quality_keys.index(template_quality_key)])
 
         response_settings = template_data.get("response_settings", {})
-        self.response_length_var.set(response_settings.get("max_length", "1-2文程度"))
+        template_length_key = response_settings.get("max_length", self.internal_response_length_keys[1])
+        self.response_length_var.set(template_length_key)
+        if hasattr(self, 'length_combo_widget') and template_length_key in self.internal_response_length_keys:
+            self.length_combo_widget.set(self.translated_response_length_values[self.internal_response_length_keys.index(template_length_key)])
+
         self.emoji_var.set(response_settings.get("use_emojis", True))
-        self.emotion_var.set(response_settings.get("emotion_level", "普通"))
+        template_emotion_key = response_settings.get("emotion_level", self.internal_emotion_level_keys[1])
+        self.emotion_var.set(template_emotion_key)
+        if hasattr(self, 'emotion_combo_widget') and template_emotion_key in self.internal_emotion_level_keys:
+            self.emotion_combo_widget.set(self.translated_emotion_level_values[self.internal_emotion_level_keys.index(template_emotion_key)])
 
     def on_engine_changed(self, choice=None): # CTkComboBoxのcommandは選択値を渡す
         self.update_voice_models()
@@ -246,13 +374,21 @@ class CharacterEditDialog:
         engine_choice = self.voice_engine_var.get()
         voices = []
         default_voice = ""
-        info_text = ""
+        # エンジン情報の翻訳キーをここで設定
+        engine_info_key_map = {
+            "google_ai_studio_new": "character_edit_dialog.engine_info.google_ai_studio_new",
+            "avis_speech": "character_edit_dialog.engine_info.avis_speech",
+            "voicevox": "character_edit_dialog.engine_info.voicevox",
+            "system_tts": "character_edit_dialog.engine_info.system_tts"
+        }
+        info_text = self._(engine_info_key_map.get(engine_choice, "")) # 見つからない場合は空文字
+
         api_instance = None
 
-        if engine_choice == "google_ai_studio_new": api_instance = GoogleAIStudioNewVoiceAPI(); info_text = "🚀 最新SDK・リアルタイム・多言語"
-        elif engine_choice == "avis_speech": api_instance = AvisSpeechEngineAPI(); info_text = "🎙️ ローカル・高品質・VOICEVOX互換"
-        elif engine_choice == "voicevox": api_instance = VOICEVOXEngineAPI(); info_text = "🎤 定番キャラ・ずんだもん等"
-        elif engine_choice == "system_tts": api_instance = SystemTTSAPI(); info_text = "💻 OS標準TTS・無料・オフライン"
+        if engine_choice == "google_ai_studio_new": api_instance = GoogleAIStudioNewVoiceAPI()
+        elif engine_choice == "avis_speech": api_instance = AvisSpeechEngineAPI()
+        elif engine_choice == "voicevox": api_instance = VOICEVOXEngineAPI()
+        elif engine_choice == "system_tts": api_instance = SystemTTSAPI()
 
         if api_instance:
             try:
@@ -265,15 +401,19 @@ class CharacterEditDialog:
                 default_voice = voices[0] if voices else ""
             except Exception as e:
                 logger.error(f"Error getting voices for {engine_choice}: {e}")
-                voices = ["エラー"]; default_voice = "エラー"; info_text += " (リスト取得エラー)"
-        else: voices = ["N/A"]; default_voice = "N/A"
+                voices = [self._("character_edit_dialog.voice_model.error")]; default_voice = self._("character_edit_dialog.voice_model.error")
+                info_text += self._("character_edit_dialog.engine_info.list_error_suffix")
+        else:
+            voices = [self._("character_edit_dialog.voice_model.na")]
+            default_voice = self._("character_edit_dialog.voice_model.na")
 
-        self.voice_combo.configure(values=voices if voices else ["選択肢なし"]) # .configureで更新
+        self.voice_combo.configure(values=voices if voices else [self._("character_edit_dialog.voice_model.no_options")]) # .configureで更新
         if voices:
             current_selection = self.voice_var.get()
             if current_selection and current_selection in voices: self.voice_var.set(current_selection)
             else: self.voice_var.set(default_voice)
-        else: self.voice_var.set("選択肢なし" if not voices else "")
+        else:
+            self.voice_var.set(self._("character_edit_dialog.voice_model.no_options") if not voices else "")
         self.engine_info_label.configure(text=info_text) # .configureで更新
 
     def _get_api_key(self, key_name):
@@ -282,11 +422,12 @@ class CharacterEditDialog:
              # CharacterManagementWindowがself.configを持つ想定
             if hasattr(self.parent, 'config_manager_instance'): # 仮の属性名
                 return self.parent.config_manager_instance.get_system_setting(key_name, "")
-        logger.warning(f"APIキー '{key_name}' の取得に失敗しました。ConfigManagerが設定されていません。")
+        logger.warning(self._("character_edit_dialog.log.api_key_fetch_failed", key_name=key_name))
         return ""
 
     def test_voice(self):
-        text = f"こんにちは！私は{self.name_var.get() or 'テスト'}です。音声テスト中です。"
+        name_or_test = self.name_var.get() or self._("character_edit_dialog.voice_test.default_name_for_test") # "テスト"部分も翻訳対象にする場合
+        text = self._("character_edit_dialog.voice_test.text", name_or_test=name_or_test)
         voice_engine_choice = self.voice_engine_var.get()
         voice_model_choice = self.voice_var.get()
         speed_choice = self.speed_var.get()
@@ -305,18 +446,21 @@ class CharacterEditDialog:
                 )
                 if audio_files:
                     loop.run_until_complete(audio_player.play_audio_files(audio_files))
-                    logger.info(f"Voice test successful: {voice_engine_choice}/{voice_model_choice}")
+                    # logger.info(f"Voice test successful: {voice_engine_choice}/{voice_model_choice}") # 英語ログはそのまま
                 else:
-                    logger.error(f"Voice test failed: {voice_engine_choice}/{voice_model_choice}")
-                    messagebox.showerror("音声テスト失敗", "音声ファイルの生成に失敗しました。", parent=self.dialog) # parentはCTkToplevel
+                    # logger.error(f"Voice test failed: {voice_engine_choice}/{voice_model_choice}") # 英語ログはそのまま
+                    messagebox.showerror(self._("character_edit_dialog.messagebox.voice_test_failed.title"),
+                                         self._("character_edit_dialog.messagebox.voice_test_failed.message_generation"), parent=self.dialog)
             except Exception as e:
-                logger.error(f"Voice test error: {e}", exc_info=True)
-                messagebox.showerror("音声テストエラー", f"エラーが発生しました: {e}", parent=self.dialog)
+                # logger.error(f"Voice test error: {e}", exc_info=True) # 英語ログはそのまま
+                messagebox.showerror(self._("character_edit_dialog.messagebox.voice_test_error.title"),
+                                     self._("character_edit_dialog.messagebox.voice_test_error.message_generic", error=e), parent=self.dialog)
             finally: loop.close()
         threading.Thread(target=run_test_async, daemon=True).start()
 
     def compare_voice_engines(self):
-        text = f"私は{self.name_var.get() or 'テスト'}です。各エンジンの音質を比較します。"
+        name_or_test = self.name_var.get() or self._("character_edit_dialog.voice_test.default_name_for_test") # "テスト"部分
+        base_text = self._("character_edit_dialog.engine_comparison.text", name_or_test=name_or_test)
         api_key_google = self._get_api_key("google_ai_api_key")
 
         def run_comparison_async():
@@ -343,8 +487,9 @@ class CharacterEditDialog:
                         model_to_use = available_voices[0]
                     elif not available_voices: logger.warning(f"No voices for {engine_name}"); continue
 
-                    logger.info(f"Comparing engine {i}: {engine_name} with model {model_to_use}")
-                    test_text_engine = f"エンジン{i}番、{engine_name}、モデル{model_to_use}による音声です。{text}"
+                    # logger.info(f"Comparing engine {i}: {engine_name} with model {model_to_use}") # 英語ログ
+                    test_text_engine = self._("character_edit_dialog.engine_comparison.text_per_engine",
+                                              i=i, engine_name=engine_name, model_to_use=model_to_use, text=base_text)
                     audio_files = loop.run_until_complete(
                         voice_manager_local.synthesize_with_fallback(
                             test_text_engine, model_to_use, 1.0, preferred_engine=engine_name, api_key=api_key_google
@@ -352,19 +497,23 @@ class CharacterEditDialog:
                     )
                     if audio_files:
                         loop.run_until_complete(audio_player.play_audio_files(audio_files))
-                        logger.info(f"Comparison for {engine_name} successful.")
-                    else: logger.error(f"Comparison for {engine_name} failed.")
+                        # logger.info(f"Comparison for {engine_name} successful.") # 英語ログ
+                    # else: logger.error(f"Comparison for {engine_name} failed.") # 英語ログ
                     time.sleep(1)
-                logger.info("Voice engine comparison finished.")
+                # logger.info("Voice engine comparison finished.") # 英語ログ
             except Exception as e:
-                logger.error(f"Voice engine comparison error: {e}", exc_info=True)
-                messagebox.showerror("比較テストエラー", f"エラーが発生しました: {e}", parent=self.dialog)
+                # logger.error(f"Voice engine comparison error: {e}", exc_info=True) # 英語ログ
+                messagebox.showerror(self._("character_edit_dialog.messagebox.comparison_error.title"),
+                                     self._("character_edit_dialog.messagebox.comparison_error.message_generic", error=e), parent=self.dialog)
             finally: loop.close()
         threading.Thread(target=run_comparison_async, daemon=True).start()
 
     def save_character(self):
         name = self.name_var.get().strip()
-        if not name: messagebox.showwarning("エラー", "キャラクター名を入力してください", parent=self.dialog); return
+        if not name:
+            messagebox.showwarning(self._("character_edit_dialog.messagebox.error.title"),
+                                 self._("character_edit_dialog.messagebox.error.name_required"), parent=self.dialog)
+            return
         try:
             char_data = {
                 "name": name,
@@ -397,17 +546,23 @@ class CharacterEditDialog:
                 self.result = {"char_id": char_id_new, "name": name, "action": "created"}
             self.dialog.destroy()
         except Exception as e:
-            action_str = "編集" if self.is_edit_mode else "作成"
-            logger.error(f"Character {action_str} failed: {e}", exc_info=True)
-            messagebox.showerror("エラー", f"キャラクターの{action_str}に失敗: {e}", parent=self.dialog)
+            action_key = "character_edit_dialog.action.edit" if self.is_edit_mode else "character_edit_dialog.action.create"
+            action_str_translated = self._(action_key)
+            # logger.error(f"Character {action_str_translated} failed: {e}", exc_info=True) # ログは英語のままか、別途翻訳キーを用意
+            messagebox.showerror(self._("character_edit_dialog.messagebox.error.title"),
+                                 self._("character_edit_dialog.messagebox.error.save_failed", action=action_str_translated, error=e),
+                                 parent=self.dialog)
 
 class CharacterManagementWindow:
     def __init__(self, root: customtkinter.CTk):
+        i18n_setup.init_i18n()
+        self._ = i18n_setup.get_translator()
+
         self.root = root
-        self.root.title("キャラクター管理")
+        self.root.title(self._("character_manager.title"))
         self.root.geometry("950x750")
 
-        self.loading_label = customtkinter.CTkLabel(self.root, text="読み込み中...", font=("Yu Gothic UI", 18))
+        self.loading_label = customtkinter.CTkLabel(self.root, text=self._("character_manager.loading"), font=("Yu Gothic UI", 18))
         self.loading_label.pack(expand=True, fill="both")
         self.root.update_idletasks()
 
@@ -430,12 +585,12 @@ class CharacterManagementWindow:
 
         self.create_widgets()
         self.refresh_character_list_display()
-        self.log("キャラクター管理ウィンドウが初期化されました。")
+        self.log(self._("character_manager.log.initialized"))
 
 
     def log(self, message):
         # CharacterManagementWindow の log メソッドはUIウィジェットに書き込まない
-        logger.info(message)
+        logger.info(message) # ログ出力は翻訳しないことが多いが、必要なら self._() を使う
 
     def create_widgets(self):
         # メインフレーム
@@ -445,7 +600,7 @@ class CharacterManagementWindow:
         # キャラクターリスト表示フレーム (CTkFrame + CTkLabel)
         list_outer_frame = customtkinter.CTkFrame(main_frame)
         list_outer_frame.pack(fill="both", expand=True, padx=5, pady=5)
-        customtkinter.CTkLabel(list_outer_frame, text="キャラクター一覧", font=self.label_font).pack(anchor="w", padx=10, pady=(5,0))
+        customtkinter.CTkLabel(list_outer_frame, text=self._("character_manager.label.character_list"), font=self.label_font).pack(anchor="w", padx=10, pady=(5,0))
         list_frame = customtkinter.CTkFrame(list_outer_frame)
         list_frame.pack(fill="both", expand=True, padx=5, pady=5)
 
@@ -456,11 +611,11 @@ class CharacterManagementWindow:
         style.configure("Treeview", font=self.treeview_font, rowheight=int(self.treeview_font[1]*2.0))
 
         self.char_tree = ttk.Treeview(list_frame, columns=('name', 'type', 'voice', 'engine', 'created'), show='headings', style="Treeview")
-        self.char_tree.heading('name', text='キャラクター名')
-        self.char_tree.heading('type', text='タイプ')
-        self.char_tree.heading('voice', text='音声モデル')
-        self.char_tree.heading('engine', text='音声エンジン')
-        self.char_tree.heading('created', text='作成日時')
+        self.char_tree.heading('name', text=self._("character_manager.tree.header.name"))
+        self.char_tree.heading('type', text=self._("character_manager.tree.header.type"))
+        self.char_tree.heading('voice', text=self._("character_manager.tree.header.voice_model"))
+        self.char_tree.heading('engine', text=self._("character_manager.tree.header.voice_engine"))
+        self.char_tree.heading('created', text=self._("character_manager.tree.header.created_at"))
         self.char_tree.column('name', width=150, stretch=tk.YES); self.char_tree.column('type', width=100, stretch=tk.YES)
         self.char_tree.column('voice', width=150, stretch=tk.YES); self.char_tree.column('engine', width=120, stretch=tk.YES)
         self.char_tree.column('created', width=150, stretch=tk.YES)
@@ -477,39 +632,29 @@ class CharacterManagementWindow:
 
         buttons_row1 = customtkinter.CTkFrame(char_buttons_frame, fg_color="transparent")
         buttons_row1.pack(fill="x", pady=2)
-        customtkinter.CTkButton(buttons_row1, text="📝 新規作成", command=self.create_new_character_action, font=self.default_font).pack(side="left", padx=5)
-        customtkinter.CTkButton(buttons_row1, text="✏️ 編集", command=self.edit_selected_character, font=self.default_font).pack(side="left", padx=5)
-        customtkinter.CTkButton(buttons_row1, text="📋 複製", command=self.duplicate_selected_character, font=self.default_font).pack(side="left", padx=5)
-        customtkinter.CTkButton(buttons_row1, text="🗑️ 削除", command=self.delete_selected_character, font=self.default_font).pack(side="left", padx=5)
+        customtkinter.CTkButton(buttons_row1, text=self._("character_manager.button.create_new"), command=self.create_new_character_action, font=self.default_font).pack(side="left", padx=5)
+        customtkinter.CTkButton(buttons_row1, text=self._("character_manager.button.edit"), command=self.edit_selected_character, font=self.default_font).pack(side="left", padx=5)
+        customtkinter.CTkButton(buttons_row1, text=self._("character_manager.button.duplicate"), command=self.duplicate_selected_character, font=self.default_font).pack(side="left", padx=5)
+        customtkinter.CTkButton(buttons_row1, text=self._("character_manager.button.delete"), command=self.delete_selected_character, font=self.default_font).pack(side="left", padx=5)
 
         buttons_row2 = customtkinter.CTkFrame(char_buttons_frame, fg_color="transparent")
         buttons_row2.pack(fill="x", pady=2)
-        customtkinter.CTkButton(buttons_row2, text="📤 エクスポート", command=self.export_selected_character, font=self.default_font).pack(side="left", padx=5)
-        customtkinter.CTkButton(buttons_row2, text="📥 インポート", command=self.import_character_action, font=self.default_font).pack(side="left", padx=5)
-        customtkinter.CTkButton(buttons_row2, text="🎤 音声テスト(選択中)", command=self.test_selected_character_voice, font=self.default_font).pack(side="left", padx=5)
+        customtkinter.CTkButton(buttons_row2, text=self._("character_manager.button.export"), command=self.export_selected_character, font=self.default_font).pack(side="left", padx=5)
+        customtkinter.CTkButton(buttons_row2, text=self._("character_manager.button.import"), command=self.import_character_action, font=self.default_font).pack(side="left", padx=5)
+        customtkinter.CTkButton(buttons_row2, text=self._("character_manager.button.test_voice_selected"), command=self.test_selected_character_voice, font=self.default_font).pack(side="left", padx=5)
 
         # テンプレート情報表示 (CTkTextboxを使用)
         template_outer_frame = customtkinter.CTkFrame(main_frame)
         template_outer_frame.pack(fill="x", padx=5, pady=5)
-        customtkinter.CTkLabel(template_outer_frame, text="テンプレート一覧 v2.2（4エンジン完全対応）", font=self.label_font).pack(anchor="w", padx=10, pady=(5,0))
+        customtkinter.CTkLabel(template_outer_frame, text=self._("character_manager.label.template_list_v2_2"), font=self.label_font).pack(anchor="w", padx=10, pady=(5,0))
         template_display_frame = customtkinter.CTkFrame(template_outer_frame)
         template_display_frame.pack(fill="x", padx=5, pady=5)
 
         template_info_text = customtkinter.CTkTextbox(template_display_frame, height=180, width=100, wrap="word", font=self.default_font) # CTkTextbox
         template_info_text.pack(fill="both", expand=True, padx=5, pady=5)
 
-        template_content = """
-🚀 最新AI系: 未来的・知的・革新的思考・グローバル視点 【Google AI Studio新音声: alloy】
-🌟 元気系: 関西弁・超ポジティブ・リアクション大・エネルギッシュ 【Avis Speech: Anneli(ノーマル)】
-🎓 知的系: 丁寧語・論理的・先生タイプ・博学 【Avis Speech: Anneli(クール)】
-🌸 癒し系: ふんわり・穏やか・聞き上手・母性的 【Avis Speech: Anneli(ささやき)】
-🎭 ずんだもん系: 「〜のだ」語尾・親しみやすい・東北弁・愛されキャラ 【VOICEVOX: ずんだもん(ノーマル)】
-🎪 キャラクター系: アニメ調・個性的・エンターテイナー・表現豊か 【VOICEVOX: 四国めたん(ノーマル)】
-⭐ プロ品質系: プロフェッショナル・上品・洗練・エレガント 【Google AI Studio新音声: puck】
-🌍 多言語対応系: 国際的・グローバル・多文化理解・文化架け橋 【Google AI Studio新音声: nova】
-🛠️ カスタム: 自由設定・完全カスタマイズ・オリジナル
-        """
-        template_info_text.insert("1.0", template_content.strip())
+        # テンプレート内容は翻訳されたものを挿入
+        template_info_text.insert("1.0", self._("character_manager.template_info.content").strip())
         template_info_text.configure(state="disabled") # 編集不可に
 
     def refresh_character_list_display(self):
@@ -517,50 +662,64 @@ class CharacterManagementWindow:
         characters = self.character_manager.get_all_characters()
         for char_id, data in characters.items():
             self.char_tree.insert('', 'end', iid=char_id, values=(
-                data.get('name', 'Unknown'), self._estimate_character_type(data),
+                data.get('name', 'Unknown'), self._estimate_character_type(data), # _estimate_character_type で翻訳
                 data.get('voice_settings', {}).get('model', 'N/A'),
                 data.get('voice_settings', {}).get('engine', 'N/A'),
                 data.get('created_at', 'N/A')
             ))
-        self.log(f"キャラクターリスト表示を更新 ({len(characters)}件)")
+        self.log(self._("character_manager.log.list_refreshed", count=len(characters)))
 
     def _estimate_character_type(self, char_data):
+        # 内部的な比較は元の日本語で行い、表示する文字列のみ翻訳する
         tone = char_data.get('personality', {}).get('base_tone', '').lower()
-        if '元気' in tone or '明るい' in tone: return '🌟 元気系'
-        if '知的' in tone or '落ち着いた' in tone: return '🎓 知的系'
-        if '癒し' in tone or '穏やか' in tone: return '🌸 癒し系'
-        if 'ずんだもん' in char_data.get('name','').lower() : return '🎭 ずんだもん系'
-        return '⚙️ カスタム'
+        name_lower = char_data.get('name','').lower()
+        if '元気' in tone or '明るい' in tone: return self._('character_manager.type.energetic')
+        if '知的' in tone or '落ち着いた' in tone: return self._('character_manager.type.intelligent')
+        if '癒し' in tone or '穏やか' in tone: return self._('character_manager.type.healing')
+        if 'ずんだもん' in name_lower : return self._('character_manager.type.zundamon')
+        return self._('character_manager.type.custom')
 
     def create_new_character_action(self):
         dialog = CharacterEditDialog(self.root, self.character_manager, config_manager=self.config_manager)
         if dialog.result and dialog.result.get("action") == "created":
             self.refresh_character_list_display()
-            self.log(f"✅ 新キャラクター '{dialog.result['name']}' を作成")
+            self.log(self._("character_manager.log.character_created", name=dialog.result['name']))
 
     def edit_selected_character(self):
         selection = self.char_tree.selection()
-        if not selection: messagebox.showwarning("選択エラー", "編集するキャラクターを選択してください", parent=self.root); return
+        if not selection:
+            messagebox.showwarning(self._("character_manager.messagebox.selection_error.title"),
+                                 self._("character_manager.messagebox.selection_error.message_edit"), parent=self.root)
+            return
         char_id = selection[0]
-        char_data = self.character_manager.config.get_character(char_id) # 修正
-        if not char_data: messagebox.showerror("エラー", "キャラクターデータが見つかりません", parent=self.root); return
+        char_data = self.character_manager.config.get_character(char_id)
+        if not char_data:
+            messagebox.showerror(self._("character_manager.messagebox.error.title"),
+                                 self._("character_manager.messagebox.error.char_data_not_found"), parent=self.root)
+            return
         dialog = CharacterEditDialog(self.root, self.character_manager, char_id, char_data, config_manager=self.config_manager)
         if dialog.result and dialog.result.get("action") == "edited":
             self.refresh_character_list_display()
-            self.log(f"✏️ キャラクター '{dialog.result['name']}' を編集")
+            self.log(self._("character_manager.log.character_edited", name=dialog.result['name']))
 
     def duplicate_selected_character(self):
         selection = self.char_tree.selection()
-        if not selection: messagebox.showwarning("選択エラー", "複製するキャラクターを選択してください", parent=self.root); return
+        if not selection:
+            messagebox.showwarning(self._("character_manager.messagebox.selection_error.title"),
+                                 self._("character_manager.messagebox.selection_error.message_duplicate"), parent=self.root)
+            return
         source_char_id = selection[0]
-        source_char_data = self.character_manager.config.get_character(source_char_id) # 修正
-        if not source_char_data: messagebox.showerror("エラー", "複製元キャラクターデータが見つかりません", parent=self.root); return
+        source_char_data = self.character_manager.config.get_character(source_char_id)
+        if not source_char_data:
+            messagebox.showerror(self._("character_manager.messagebox.error.title"),
+                                 self._("character_manager.messagebox.error.source_char_data_not_found"), parent=self.root)
+            return
 
-        # CTkInputDialog を使用
-        dialog = customtkinter.CTkInputDialog(text="新しいキャラクター名:", title="キャラクター複製")
-        new_name = dialog.get_input() # .get_input()で値を取得
+        dialog = customtkinter.CTkInputDialog(text=self._("character_manager.input_dialog.duplicate_character.text"),
+                                            title=self._("character_manager.input_dialog.duplicate_character.title"))
+        new_name = dialog.get_input()
 
-        if new_name: # Noneや空文字列でないことを確認
+        if new_name:
             try:
                 new_char_data = json.loads(json.dumps(source_char_data))
                 new_char_data['name'] = new_name
@@ -569,78 +728,107 @@ class CharacterManagementWindow:
                 if 'updated_at' in new_char_data: del new_char_data['updated_at']
                 new_id = self.character_manager.create_character(name=new_name, custom_settings=new_char_data)
                 self.refresh_character_list_display()
-                self.log(f"📋 キャラクター '{new_name}' (ID: {new_id}) を複製")
+                self.log(self._("character_manager.log.character_duplicated", name=new_name, id=new_id))
             except Exception as e:
-                messagebox.showerror("複製エラー", f"複製に失敗: {e}", parent=self.root)
-                self.log(f"❌ 複製エラー: {e}")
+                messagebox.showerror(self._("character_manager.messagebox.duplicate_error.title"),
+                                     self._("character_manager.messagebox.duplicate_error.message", error=e), parent=self.root)
+                self.log(self._("character_manager.log.duplicate_error", error=e))
 
     def delete_selected_character(self):
         selection = self.char_tree.selection()
-        if not selection: messagebox.showwarning("選択エラー", "削除するキャラクターを選択してください", parent=self.root); return
+        if not selection:
+            messagebox.showwarning(self._("character_manager.messagebox.selection_error.title"),
+                                 self._("character_manager.messagebox.selection_error.message_delete"), parent=self.root)
+            return
         char_id = selection[0]
         char_name = self.char_tree.item(char_id, 'values')[0]
-        if messagebox.askyesno("削除確認", f"キャラクター '{char_name}' を削除しますか？\nこの操作は取り消せません。", parent=self.root):
+        if messagebox.askyesno(self._("character_manager.messagebox.delete_confirm.title"),
+                               self._("character_manager.messagebox.delete_confirm.message", char_name=char_name), parent=self.root):
             if self.character_manager.delete_character(char_id):
                 self.refresh_character_list_display()
-                self.log(f"🗑️ キャラクター '{char_name}' を削除")
+                self.log(self._("character_manager.log.character_deleted", char_name=char_name))
             else:
-                messagebox.showerror("削除エラー", "キャラクターの削除に失敗しました。", parent=self.root)
+                messagebox.showerror(self._("character_manager.messagebox.delete_error.title"),
+                                     self._("character_manager.messagebox.delete_error.message"), parent=self.root)
 
     def export_selected_character(self):
         selection = self.char_tree.selection()
-        if not selection: messagebox.showwarning("選択エラー", "エクスポートするキャラクターを選択してください", parent=self.root); return
+        if not selection:
+            messagebox.showwarning(self._("character_manager.messagebox.selection_error.title"),
+                                 self._("character_manager.messagebox.selection_error.message_export"), parent=self.root)
+            return
         char_id = selection[0]
-        char_data = self.character_manager.config.get_character(char_id) # 修正
-        if not char_data: messagebox.showerror("エラー", "キャラクターデータが見つかりません", parent=self.root); return
+        char_data = self.character_manager.config.get_character(char_id)
+        if not char_data:
+            messagebox.showerror(self._("character_manager.messagebox.error.title"),
+                                 self._("character_manager.messagebox.error.char_data_not_found"), parent=self.root)
+            return
         filepath = filedialog.asksaveasfilename(
-            defaultextension=".json", filetypes=[("JSONキャラクターファイル", "*.json")],
+            defaultextension=".json",
+            filetypes=[(self._("character_manager.filedialog.export_character.filetype"), "*.json")],
             initialfile=f"{char_data.get('name', 'character').replace(' ', '_')}.json",
-            title="キャラクターをエクスポート", parent=self.root
+            title=self._("character_manager.filedialog.export_character.title"), parent=self.root
         )
         if filepath:
             try:
                 with open(filepath, "w", encoding="utf-8") as f: json.dump(char_data, f, ensure_ascii=False, indent=4)
-                messagebox.showinfo("エクスポート完了", f"キャラクターを '{filepath}' に保存しました。", parent=self.root)
-                self.log(f"📤 キャラクター '{char_data.get('name')}' をエクスポート: {filepath}")
+                messagebox.showinfo(self._("character_manager.messagebox.export_complete.title"),
+                                    self._("character_manager.messagebox.export_complete.message", filepath=filepath), parent=self.root)
+                self.log(self._("character_manager.log.character_exported", name=char_data.get('name'), filepath=filepath))
             except Exception as e:
-                messagebox.showerror("エクスポートエラー", f"エクスポート失敗: {e}", parent=self.root)
+                messagebox.showerror(self._("character_manager.messagebox.export_error.title"),
+                                     self._("character_manager.messagebox.export_error.message", error=e), parent=self.root)
 
     def import_character_action(self):
         filepath = filedialog.askopenfilename(
-            title="キャラクターJSONファイルを選択", filetypes=[("JSONファイル", "*.json")], parent=self.root
+            title=self._("character_manager.filedialog.import_character.title"),
+            filetypes=[(self._("character_manager.filedialog.import_character.filetype"), "*.json")], parent=self.root # settingsと共通化も検討
         )
         if not filepath: return
         try:
             with open(filepath, "r", encoding="utf-8") as f: imported_data = json.load(f)
             if not all(k in imported_data for k in ["name", "personality", "voice_settings"]):
-                messagebox.showerror("インポートエラー", "ファイル形式が正しくありません。必須キーが不足しています。", parent=self.root); return
+                messagebox.showerror(self._("character_manager.messagebox.import_error.title"),
+                                     self._("character_manager.messagebox.import_error.message_format"), parent=self.root)
+                return
             if 'char_id' in imported_data: del imported_data['char_id']
             if 'created_at' in imported_data: del imported_data['created_at']
             if 'updated_at' in imported_data: del imported_data['updated_at']
             new_id = self.character_manager.create_character(
-                name=imported_data.get('name', 'インポートされたキャラ'), custom_settings=imported_data
+                name=imported_data.get('name', self._("character_manager.default_imported_char_name", default="Imported Character")), # デフォルト名も翻訳
+                custom_settings=imported_data
             )
             self.refresh_character_list_display()
-            self.log(f"📥 キャラクター '{imported_data.get('name')}' (ID: {new_id}) をインポート")
-            messagebox.showinfo("インポート完了", f"キャラクター '{imported_data.get('name')}' をインポートしました。", parent=self.root)
-        except json.JSONDecodeError: messagebox.showerror("インポートエラー", "JSONファイルの解析に失敗しました。", parent=self.root)
+            self.log(self._("character_manager.log.character_imported", name=imported_data.get('name'), id=new_id))
+            messagebox.showinfo(self._("character_manager.messagebox.import_complete.title"),
+                                self._("character_manager.messagebox.import_complete.message", name=imported_data.get('name')), parent=self.root)
+        except json.JSONDecodeError:
+            messagebox.showerror(self._("character_manager.messagebox.import_error.title"),
+                                 self._("character_manager.messagebox.import_error.message_json_decode"), parent=self.root)
         except Exception as e:
-            messagebox.showerror("インポートエラー", f"インポート失敗: {e}", parent=self.root)
-            self.log(f"❌ インポートエラー: {e}")
+            messagebox.showerror(self._("character_manager.messagebox.import_error.title"),
+                                 self._("character_manager.messagebox.import_error.message_generic", error=e), parent=self.root)
+            self.log(self._("character_manager.log.import_error", error=e))
 
     def test_selected_character_voice(self):
         selection = self.char_tree.selection()
-        if not selection: messagebox.showwarning("選択なし", "音声テストするキャラクターを選択してください。", parent=self.root); return
+        if not selection:
+            messagebox.showwarning(self._("character_manager.messagebox.no_selection.title"),
+                                 self._("character_manager.messagebox.no_selection.message_test_voice"), parent=self.root)
+            return
         char_id = selection[0]
-        char_data = self.character_manager.config.get_character(char_id) # 修正
-        if not char_data: messagebox.showerror("エラー", "キャラクターデータが見つかりません。", parent=self.root); return
+        char_data = self.character_manager.config.get_character(char_id)
+        if not char_data:
+            messagebox.showerror(self._("character_manager.messagebox.error.title"),
+                                 self._("character_manager.messagebox.error.char_data_not_found"), parent=self.root)
+            return
 
-        # CTkInputDialog を使用
-        dialog = customtkinter.CTkInputDialog(text="テストするテキストを入力してください:", title="音声テスト")
+        dialog = customtkinter.CTkInputDialog(text=self._("character_manager.input_dialog.voice_test.text"),
+                                            title=self._("character_manager.input_dialog.voice_test.title"))
         test_text = dialog.get_input()
         if not test_text: return
 
-        self.log(f"🎤 キャラクター '{char_data['name']}' の音声テスト開始...")
+        self.log(self._("character_manager.log.voice_test_start", name=char_data['name']))
         voice_settings = char_data.get('voice_settings', {})
         engine_choice = voice_settings.get('engine', self.config_manager.get_system_setting('voice_engine'))
         model_choice = voice_settings.get('model')
@@ -659,13 +847,15 @@ class CharacterManagementWindow:
                 )
                 if audio_files:
                     loop.run_until_complete(audio_player.play_audio_files(audio_files))
-                    self.log(f"✅ '{char_data['name']}' 音声テスト成功。")
+                    self.log(self._("character_manager.log.voice_test_success", name=char_data['name']))
                 else:
-                    self.log(f"❌ '{char_data['name']}' 音声テスト失敗。")
-                    messagebox.showerror("音声テスト失敗", "音声ファイルの生成に失敗しました。", parent=self.root)
+                    self.log(self._("character_manager.log.voice_test_failed", name=char_data['name']))
+                    messagebox.showerror(self._("character_manager.messagebox.voice_test_failed.title"),
+                                         self._("character_manager.messagebox.voice_test_failed.message_generation"), parent=self.root)
             except Exception as e:
-                self.log(f"❌ 音声テストエラー: {e}")
-                messagebox.showerror("音声テストエラー", f"エラー発生: {e}", parent=self.root)
+                self.log(self._("character_manager.log.voice_test_error", error=e))
+                messagebox.showerror(self._("character_manager.messagebox.voice_test_error.title"),
+                                     self._("character_manager.messagebox.voice_test_error.message_generic", error=e), parent=self.root)
             finally: loop.close()
         threading.Thread(target=run_test_async, daemon=True).start()
 
