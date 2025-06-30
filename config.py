@@ -123,7 +123,8 @@ class ConfigManager:
             "ui_settings": {
                 "window_size": "1000x900",
                 "theme": "default",
-                "log_level": "INFO"
+                "log_level": "INFO",
+                "language": "ja"  # デフォルト言語を日本語に設定
             },
             "voice_engine_priority": [
                 "google_ai_studio_new",    # 最新・2025年5月追加
@@ -203,3 +204,19 @@ class ConfigManager:
         if self.config.get("system_settings", {}).get("auto_save", True): # auto_save設定を尊重
             self.save_config()
         print("システム設定が更新されました。")
+
+    def get_language(self):
+        """現在の言語設定を取得"""
+        return self.config.get("ui_settings", {}).get("language", "ja")
+
+    def set_language(self, language_code):
+        """言語設定を更新"""
+        if "ui_settings" not in self.config:
+            self.config["ui_settings"] = {}
+        self.config["ui_settings"]["language"] = language_code
+        # auto_save は system_settings の設定なので、ここでは参照しない。
+        # ui_settings の変更時にも保存するのが適切か、
+        # auto_save をグローバルな設定とみなすかによる。
+        # ここでは、set_system_setting と同様に auto_save を確認する。
+        if self.get_system_setting("auto_save", True):
+            self.save_config()
