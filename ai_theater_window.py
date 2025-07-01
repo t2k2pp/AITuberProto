@@ -177,7 +177,7 @@ class AITheaterWindow:
 
     def populate_talker_dropdown(self):
         all_chars = self.character_manager.get_all_characters()
-        char_names = [data.get('name', 'Unknown') for data in all_chars.values()]
+        char_names = [data.get('name', self._("ai_theater.dropdown.unknown_character_name")) for data in all_chars.values()]
 
         narrator_str = self._("ai_theater.dropdown.narrator")
         no_talker_str = self._("ai_theater.dropdown.no_talker")

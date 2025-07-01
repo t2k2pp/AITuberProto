@@ -63,7 +63,7 @@ class DebugWindow:
         ]
         self.load_settings_for_debug_window() # ここでソートも行われる
         self.create_widgets()
-        self.log("デバッグウィンドウが初期化されました。")
+        self.log(self._("debug.log.initialized"))
 
 
     def log(self, message):

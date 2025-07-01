@@ -39,19 +39,16 @@ class LauncherWindow:
 
         if session_log_path:
             os.environ['GLOBAL_SESSION_LOG_PATH'] = os.path.abspath(session_log_path)
-            print(f"Launcher: Set GLOBAL_SESSION_LOG_PATH = {os.environ['GLOBAL_SESSION_LOG_PATH']}")
+            print(_("launcher.log.env_set", env_var_name="GLOBAL_SESSION_LOG_PATH", env_var_value=os.environ['GLOBAL_SESSION_LOG_PATH']))
         else:
-            print("Launcher: Error: Could not get session log path from CommunicationLogger.")
-            # エラー処理: 環境変数が設定できない場合、サブプロセスでのログ記録が期待通りに動作しない可能性
-            # ここでアプリケーションを終了させるか、警告を出すかなどの判断が必要
-            # 今回は警告のみとする
+            print(_("launcher.log.error_get_session_log_path"))
             tkinter.messagebox.showwarning(_("launcher.logger_init_error.title"), _("launcher.logger_init_error.session_log_path_failure"))
 
         if log_dir_path:
             os.environ['GLOBAL_LOG_DIR_PATH'] = os.path.abspath(log_dir_path)
-            print(f"Launcher: Set GLOBAL_LOG_DIR_PATH = {os.environ['GLOBAL_LOG_DIR_PATH']}")
+            print(_("launcher.log.env_set", env_var_name="GLOBAL_LOG_DIR_PATH", env_var_value=os.environ['GLOBAL_LOG_DIR_PATH']))
         else:
-            print("Launcher: Error: Could not get log directory path from CommunicationLogger.")
+            print(_("launcher.log.error_get_log_dir_path"))
             tkinter.messagebox.showwarning(_("launcher.logger_init_error.title"), _("launcher.logger_init_error.log_dir_path_failure"))
         # --- ここまで追加 ---
 

@@ -2,11 +2,15 @@ import customtkinter
 import tkinter as tk # messagebox のため
 import os # ファイル存在確認のため
 from communication_logger import CommunicationLogger
+import i18n_setup # 追加
 
 class CommunicationLogWindow(customtkinter.CTkToplevel):
     def __init__(self, master=None):
         super().__init__(master)
-        self.title("通信詳細ログ")
+        i18n_setup.init_i18n() # 強制再初期化
+        self._ = i18n_setup.get_translator()
+
+        self.title(self._("comm_log.title"))
         self.geometry("800x600")
 
         self.logger = CommunicationLogger() # ロガーのインスタンスを取得
@@ -19,17 +23,17 @@ class CommunicationLogWindow(customtkinter.CTkToplevel):
         button_frame = customtkinter.CTkFrame(main_frame, fg_color="transparent")
         button_frame.pack(fill="x", pady=(0, 10))
 
-        self.refresh_button = customtkinter.CTkButton(button_frame, text="更新", command=self.refresh_logs)
+        self.refresh_button = customtkinter.CTkButton(button_frame, text=self._("comm_log.button.refresh"), command=self.refresh_logs)
         self.refresh_button.pack(side="left", padx=(0, 5))
 
-        self.save_button = customtkinter.CTkButton(button_frame, text="現在の表示内容をファイルに保存 (スナップショット)", command=self.save_snapshot_logs)
+        self.save_button = customtkinter.CTkButton(button_frame, text=self._("comm_log.button.save_snapshot"), command=self.save_snapshot_logs)
         self.save_button.pack(side="left", padx=5)
 
-        self.clear_memory_button = customtkinter.CTkButton(button_frame, text="メモリ上のログをクリア", command=self.clear_memory_logs)
+        self.clear_memory_button = customtkinter.CTkButton(button_frame, text=self._("comm_log.button.clear_memory"), command=self.clear_memory_logs)
         self.clear_memory_button.pack(side="left", padx=5)
 
         # セッションログファイルパス表示ラベル
-        self.session_file_label = customtkinter.CTkLabel(button_frame, text="セッションログ: 未定", font=("Yu Gothic UI", 10), anchor="w")
+        self.session_file_label = customtkinter.CTkLabel(button_frame, text=self._("comm_log.label.session_log_status_default"), font=("Yu Gothic UI", 10), anchor="w")
         self.session_file_label.pack(side="left", padx=10, fill="x", expand=True)
 
 
@@ -44,32 +48,27 @@ class CommunicationLogWindow(customtkinter.CTkToplevel):
         self.log_display_textbox.delete("1.0", "end")
 
         session_log_path = self.logger.get_session_log_filepath()
+        filename_display = os.path.basename(session_log_path) if session_log_path else "N/A"
 
         if session_log_path and os.path.exists(session_log_path):
             try:
-                # セッションログファイルパスをラベルに表示
-                self.session_file_label.configure(text=f"記録中: {os.path.basename(session_log_path)}")
+                self.session_file_label.configure(text=self._("comm_log.label.session_log_status_recording", filename=filename_display))
                 with open(session_log_path, "r", encoding="utf-8") as f:
                     log_content = f.read()
                 if log_content:
-                    # 新しいログが上に来るようにファイルの内容を逆順にするのは大変なので、
-                    # ファイルに記録された順（古いものが上）で表示する。
-                    # もし逆順表示が必要なら、CommunicationLogger側でファイル書き込み順を工夫するか、
-                    # ここで読み込んだ後に行ごとに処理して逆順にする必要がある。
-                    # シンプルにするため、ここではファイル通りの順で表示する。
                     self.log_display_textbox.insert("end", log_content)
                 else:
-                    self.log_display_textbox.insert("end", f"セッションログファイル '{os.path.basename(session_log_path)}' は空です。\n")
+                    self.log_display_textbox.insert("end", self._("comm_log.message.file_empty", filename=filename_display))
             except Exception as e:
-                self.log_display_textbox.insert("end", f"セッションログファイル '{os.path.basename(session_log_path)}' の読み込みエラー: {e}\n")
-                tk.messagebox.showerror("読込エラー", f"ログファイルの読み込みに失敗しました:\n{session_log_path}\nエラー: {e}", parent=self)
+                self.log_display_textbox.insert("end", self._("comm_log.message.file_read_error", filename=filename_display, error=e))
+                tk.messagebox.showerror(self._("comm_log.messagebox.read_error.title"), self._("comm_log.messagebox.read_error.message", filepath=session_log_path, error=e), parent=self)
         else:
-            no_log_message = "セッションログファイルが見つかりません。"
+            no_log_message = self._("comm_log.message.file_not_found_generic")
             if session_log_path:
-                 no_log_message = f"セッションログファイル '{os.path.basename(session_log_path)}' が見つかりません。\nアプリケーションがログを記録し始めると作成されます。"
-                 self.session_file_label.configure(text=f"記録待機中: {os.path.basename(session_log_path)}")
+                 no_log_message = self._("comm_log.message.file_not_found_specific", filename=filename_display)
+                 self.session_file_label.configure(text=self._("comm_log.label.session_log_status_waiting", filename=filename_display))
             else:
-                 self.session_file_label.configure(text="セッションログ: パス未設定")
+                 self.session_file_label.configure(text=self._("comm_log.label.session_log_status_path_unset"))
 
             self.log_display_textbox.insert("end", no_log_message + "\n")
 
@@ -77,43 +76,35 @@ class CommunicationLogWindow(customtkinter.CTkToplevel):
 
     def save_snapshot_logs(self):
         """現在メモリに読み込まれているログのスナップショットをファイルに保存する"""
-        # CommunicationLoggerのsave_logs_to_fileはメモリ上のログを保存する
-        # refresh_logsはファイルから読み込むので、メモリ上のログと表示が一致しない可能性がある。
-        # ここでは「表示されている内容」ではなく「現在のメモリ上のログ」を保存する。
-        # もし「表示されている内容」を保存したいなら、テキストボックスの内容を取得して保存する。
-        # プランでは save_logs_to_file を呼び出すことになっているので、メモリログを保存する。
         self.logger.save_logs_to_file(parent_window=self)
 
     def clear_memory_logs(self):
         """メモリ上のログのみをクリアする。表示は次の「更新」まで変わらない。"""
-        # ボタンのテキストを「メモリ上のログをクリア」に変更したため、確認ダイアログの文言も調整
+        # CTkInputDialogのtextパラメータは翻訳された文字列を期待する
+        # "はい" の部分は英語の場合 "yes" などになるため、比較もそれに応じて行う必要がある。
+        # ここでは簡単のため、確認文字列自体は翻訳せず、メッセージのみ翻訳する。
+        # または、より堅牢な確認方法（専用の確認ダイアログなど）を検討する。
+        # 今回は、入力プロンプトの指示に従う形で、"yes" (英語の場合) または "はい" (日本語の場合) を期待する。
+        # 翻訳キーで期待する入力文字列も定義できるようにする。
+        # comm_log.input_dialog.clear_memory.confirm_input_text = "yes" (en.json) / "はい" (ja.json) のようなキーを作る。
+        # ただし、CTkInputDialogはシンプルな入力なので、ここではメッセージのみ翻訳。
+        # ユーザーには "yes" と入力するよう促す (英語の場合)。
+        # 日本語環境では "はい" と入力するよう促す。
+        # これを簡単にするため、ダイアログのメッセージに期待する文字列を埋め込む。
+        expected_confirmation_text = self._("comm_log.input_dialog.clear_memory.confirm_input_text_value") # "yes" or "はい"
+
         dialog = customtkinter.CTkInputDialog(
-            text="メモリ上の通信ログのみをクリアしますか？\n記録中のセッションログファイルには影響しません。\nスナップショット保存の対象がクリアされます。\nよろしければ「はい」と入力してください。",
-            title="メモリログクリア確認"
+            text=self._("comm_log.input_dialog.clear_memory.text", confirm_value=expected_confirmation_text),
+            title=self._("comm_log.input_dialog.clear_memory.title")
         )
         user_input = dialog.get_input()
 
-        if user_input and user_input.lower() == "はい":
-            self.logger.clear_logs() # メモリ上のログをクリア
-            # self.refresh_logs() # プランでは表示更新だが、ここではクリアしたことを明確にするため更新しない。
-            # 更新ボタンでユーザーが明示的にファイルから再読み込みする。
-            # または、クリアした旨をメッセージで表示する。
-            tk.messagebox.showinfo("クリア完了", "メモリ上のログはクリアされました。\n表示を更新するには「更新」ボタンを押してください。\nセッションログファイルは影響を受けていません。", parent=self)
-            # 表示されている内容は古いままなので、ユーザーに混乱を与えないように
-            # テキストボックスを一時的に「メモリはクリアされました」などにしても良いが、
-            # 次の更新で元に戻る。
-        elif user_input is not None:
-            tk.messagebox.showwarning("クリア中止", "入力が「はい」と一致しなかったため、メモリ上のログはクリアされませんでした。", parent=self)
+        if user_input and user_input.lower() == expected_confirmation_text.lower():
+            self.logger.clear_logs()
+            tk.messagebox.showinfo(self._("comm_log.messagebox.clear_complete.title"), self._("comm_log.messagebox.clear_complete.message"), parent=self)
+        elif user_input is not None: # ユーザーが何か入力したが、期待する文字列ではなかった場合
+            tk.messagebox.showwarning(self._("comm_log.messagebox.clear_aborted.title"), self._("comm_log.messagebox.clear_aborted.message", confirm_value=expected_confirmation_text), parent=self)
+        # user_input is None の場合はキャンセルされたので何もしない
 
     def on_closing(self):
-        # self.destroy() # launcher.py の _on_comm_log_close で destroy するので、ここでは不要
-        # ただし、protocolでこのメソッドが呼ばれるので、何もしないか、
-        # launcher側の処理を呼び出すようにするか、あるいはprotocol設定自体をlauncher側で行う。
-        # 今回はlauncher側でprotocolを設定しているので、このメソッドは呼ばれない想定。
-        # もし呼ばれる場合は、master (launcherのroot) の状態を確認するなど、
-        # launcher側のコールバックと協調する必要がある。
-        # 現状のlauncher.pyの実装では、CommunicationLogWindowインスタンスのprotocolを
-        # _on_comm_log_close に設定しているので、この on_closing は呼ばれない。
-        # よって、安全のために destroy() はコメントアウトしておく。
-        # print("CommunicationLogWindow on_closing called") # デバッグ用
         pass
