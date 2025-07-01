@@ -858,6 +858,25 @@
         "debug.log.ai_chat_test_error": "❌ AI chat test error: {e}",
         "debug.log.local_llm_request_start": "🤖 {char_name}: Sending request to Local LLM ({endpoint_url})...",
         "debug.log.local_llm_call_error": "❌ Local LLM call error ({endpoint_url}): {e}",
-        "debug.log.prefix_log": "[LOG] "
+        "debug.log.prefix_log": "[LOG] ",
+        "ai_chat.log.mcp_server_init_start": "Starting MCP server initialization...",
+        "ai_chat.log.mcp_server_init_success": "MCP server initialization successful.",
+        "ai_chat.log.mcp_server_init_error": "Error during MCP server initialization: {error}",
+        "ai_chat.log.shutting_down_mcp": "Starting MCP client shutdown...",
+        "ai_chat.log.mcp_shutdown_complete": "MCP client shutdown complete.",
+        "ai_chat.log.mcp_shutdown_error": "Error during MCP client shutdown: {error}",
+        "ai_chat.mcp.error.invalid_command_format": "Invalid MCP command format. Example: /mcp <tool_id> {\"param\": \"value\"}",
+        "ai_chat.mcp.error.invalid_json_params": "Invalid JSON parameters for MCP command: {error}",
+        "ai_chat.log.mcp_tool_execution_start": "Starting execution of MCP tool '{tool_id}'. Parameters: {params}",
+        "ai_chat.mcp.success.tool_executed": "MCP tool '{tool_id}' executed successfully.\nResult:\n{result}",
+        "ai_chat.log.mcp_tool_execution_success": "Successfully executed MCP tool '{tool_id}'. Result: {result}",
+        "ai_chat.mcp.error.tool_execution_failed": "Failed to execute MCP tool '{tool_id}'.\nError: {error}",
+        "ai_chat.log.mcp_tool_execution_error": "Error executing MCP tool '{tool_id}' (error from server): {error}",
+        "ai_chat.mcp.error.tool_execution_exception": "Client-side exception during MCP tool '{tool_id}' execution.\nError: {error}",
+        "ai_chat.log.mcp_tool_execution_exception": "MCP tool '{tool_id}' execution exception: {error}",
+        "ai_chat.log.mcp_auto_new_chat_for_command": "Starting/confirming new chat session for MCP command execution.",
+        "ai_chat.messagebox.mcp_chat_not_started.confirm": "A chat session is required to execute MCP commands. Create a new one?",
+        "ai_chat.mcp.error.cannot_start_chat_session": "Could not start a chat session. MCP command cannot be executed.",
+        "ai_chat.mcp.error.chat_session_required": "A chat session must be started to execute MCP commands."
     }
 }

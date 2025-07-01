@@ -16,10 +16,11 @@ from audio_manager import VoiceEngineManager, AudioPlayer
 from google import genai
 from google.genai import types as genai_types
 from communication_logger import CommunicationLogger # 追加
+from mcp_client import MCPClientManager # MCPクライアントマネージャーをインポート
 import i18n_setup # 追加
 
 import logging
-logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+# logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s') # main.py等で設定想定
 logger = logging.getLogger(__name__)
 
 class AIChatWindow:
@@ -47,6 +48,7 @@ class AIChatWindow:
         self.voice_manager = VoiceEngineManager()
         self.audio_player = AudioPlayer(config_manager=self.config)
         self.communication_logger = CommunicationLogger() # 追加
+        self.mcp_client_manager = MCPClientManager(config_manager=self.config) # MCPクライアントマネージャー初期化
 
         self.ai_chat_history_folder = Path(self.config.config_file).parent / "ai_chat_history"
         try:
@@ -68,10 +70,29 @@ class AIChatWindow:
         self.populate_chat_character_dropdowns()
         self.load_chat_history_list()
         self.root.protocol("WM_DELETE_WINDOW", self.on_closing)
+
+        # MCPサーバーの初期化を別スレッドで実行
+        threading.Thread(target=self._initialize_mcp_servers_async, daemon=True).start()
+
         self.log(self._("ai_chat.log.init_completed"))
         # エラー発生時のメッセージボックス表示 (もしあれば)
         if not self.ai_chat_history_folder.exists():
              messagebox.showerror(self._("ai_chat.messagebox.folder_creation_error.title"), self._("ai_chat.messagebox.folder_creation_error.message", path=self.ai_chat_history_folder), parent=self.root)
+
+    def _initialize_mcp_servers_async(self):
+        """MCPサーバーの初期化を非同期で行う"""
+        self.log(self._("ai_chat.log.mcp_server_init_start"))
+        try:
+            # MCPClientManagerのメソッドがasyncなので、新しいイベントループで実行
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+            loop.run_until_complete(self.mcp_client_manager.initialize_servers_from_config())
+            loop.close()
+            self.log(self._("ai_chat.log.mcp_server_init_success"))
+        except Exception as e:
+            self.log(self._("ai_chat.log.mcp_server_init_error", error=e))
+            # UIスレッドでエラーメッセージを表示する場合は self.root.after を使用
+            # self.root.after(0, lambda: messagebox.showerror("MCP Error", f"MCPサーバーの初期化に失敗: {e}", parent=self.root))
 
 
     def log(self, message):
@@ -81,7 +102,18 @@ class AIChatWindow:
         logger.info(message)
 
     def on_closing(self):
-        self.root.destroy()
+        self.log(self._("ai_chat.log.shutting_down_mcp"))
+        try:
+            # MCPクライアントのシャットダウン (非同期)
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+            loop.run_until_complete(self.mcp_client_manager.shutdown())
+            loop.close()
+            self.log(self._("ai_chat.log.mcp_shutdown_complete"))
+        except Exception as e:
+            self.log(self._("ai_chat.log.mcp_shutdown_error", error=e))
+        finally:
+            self.root.destroy()
 
     def create_widgets(self):
         # ttk.PanedWindow の代替として、2つのCTkFrameを配置し、中間に手動でリサイズ機能を追加するか、
@@ -274,12 +306,43 @@ class AIChatWindow:
         try:
             with open(self.current_ai_chat_file_path, 'r', encoding='utf-8', newline='') as csvfile:
                 reader = csv.DictReader(csvfile)
-                if reader.fieldnames != ['action', 'talker', 'words']:
-                    messagebox.showerror(self._("ai_chat.messagebox.format_error.title"), self._("ai_chat.messagebox.csv_header_invalid"), parent=self.root)
+                # ヘッダーチェックは重要なので維持する
+                expected_headers = ['action', 'talker', 'words']
+                if not reader.fieldnames or not all(header in reader.fieldnames for header in expected_headers):
+                    # 互換性のため、古い形式のファイルも許容するか、エラーとするか。
+                    # ここでは厳密にチェックし、不足していればエラーとする。
+                    logger.error(f"CSV header mismatch. Expected: {expected_headers}, Got: {reader.fieldnames}")
+                    messagebox.showerror(self._("ai_chat.messagebox.format_error.title"),
+                                         self._("ai_chat.messagebox.csv_header_invalid") + f"\nExpected: {expected_headers}\nGot: {reader.fieldnames}",
+                                         parent=self.root)
                     return
-                for i, row in enumerate(reader):
-                    if row.get('action') == 'talk':
-                        self.chat_content_tree.insert('', 'end', values=(i + 1, row['talker'], row['words']), iid=str(i+1))
+
+                line_display_count = 0
+                for row_data in reader:
+                    action = row_data.get('action')
+                    talker = row_data.get('talker', '') # talkerがない場合も考慮
+                    words = row_data.get('words', '')   # wordsがない場合も考慮
+
+                    display_talker = talker
+                    add_to_tree = False
+
+                    if action == 'talk':
+                        add_to_tree = True
+                        # 'talk' の場合、talker はキャラクター名なのでそのまま表示
+                    elif action == 'mcp_command':
+                        add_to_tree = True
+                        display_talker = f"User (MCP)" # talker には 'User' が入っているはずだが、表示上は固定
+                    elif action == 'mcp_result':
+                        add_to_tree = True
+                        display_talker = f"💻 MCP ({talker})" # talker に tool_id が入る想定
+                    elif action == 'mcp_error':
+                        add_to_tree = True
+                        display_talker = f"💻 MCP Error ({talker})" # talker に tool_id が入る想定
+
+                    if add_to_tree:
+                        line_display_count += 1
+                        self.chat_content_tree.insert('', 'end', values=(line_display_count, display_talker, words), iid=str(line_display_count))
+
             if self.chat_content_tree.get_children():
                 self.chat_content_tree.see(self.chat_content_tree.get_children()[-1])
             self.log(self._("ai_chat.log.chat_history_loaded", filename=self.current_ai_chat_file_path.name))
@@ -288,11 +351,28 @@ class AIChatWindow:
             self.log(self._("ai_chat.log.chat_history_load_error", e=e))
 
     def _append_to_current_chat_csv(self, action, talker, words):
-        if not self.current_ai_chat_file_path or not self.current_ai_chat_file_path.exists(): return
+        self.log(f"Attempting to append to CSV: action='{action}', talker='{talker}', words='{words[:50]}...'")
+        if not self.current_ai_chat_file_path:
+            self.log("CSV Append Skipped: current_ai_chat_file_path is None.")
+            return
+        if not self.current_ai_chat_file_path.exists():
+            self.log(f"CSV Append Skipped: File does not exist at path: {self.current_ai_chat_file_path}")
+            return
+
         try:
+            self.log(f"Writing to CSV: {self.current_ai_chat_file_path}")
             with open(self.current_ai_chat_file_path, 'a', newline='', encoding='utf-8') as csvfile:
-                csv.writer(csvfile).writerow([action, talker, words])
-        except Exception as e: self.log(self._("ai_chat.log.csv_append_error", e=e))
+                csv_writer = csv.writer(csvfile)
+                csv_writer.writerow([action, talker, words])
+            self.log(f"Successfully appended to CSV: action='{action}'")
+        except Exception as e:
+            # ログメッセージは翻訳キーを使う
+            log_message = self._("ai_chat.log.csv_append_error", e=e)
+            self.log(log_message)
+            # 念のためコンソールにもスタックトレースを出力
+            import traceback
+            logger.error(f"Detailed CSV append error: {traceback.format_exc()}")
+
 
     def _add_message_to_chat_display_tree(self, talker_display_name, message_content):
         line_num = len(self.chat_content_tree.get_children()) + 1
@@ -303,6 +383,14 @@ class AIChatWindow:
     def send_ai_chat_message_action(self, event=None):
         user_input = self.chat_message_entry.get().strip()
         if not user_input: return
+
+        # MCPコマンドの処理
+        if user_input.startswith("/mcp "):
+            self.chat_message_entry.delete(0, "end")
+            self._handle_mcp_command(user_input)
+            return
+
+        # 通常のチャット処理
         no_char_text = self._("ai_chat.dropdown.no_character")
         if not self.current_ai_chat_file_path or not self.current_ai_chat_file_path.exists():
             if messagebox.askyesno(self._("ai_chat.messagebox.chat_not_started.title"), self._("ai_chat.messagebox.chat_not_started.confirm"), parent=self.root):
@@ -327,6 +415,114 @@ class AIChatWindow:
             if self.play_user_speech_var.get():
                  threading.Thread(target=self._play_character_speech_async, args=(user_char_name_selected, user_input), daemon=True).start()
             threading.Thread(target=self._generate_and_handle_ai_response, args=(user_input, ai_char_name_selected, user_char_name_selected), daemon=True).start()
+
+    def _handle_mcp_command(self, command_input: str):
+        """MCPコマンドを処理する"""
+        # チャットセッションの確認と開始
+        if not self.current_ai_chat_file_path or not self.current_ai_chat_file_path.exists():
+            self.log(self._("ai_chat.log.mcp_auto_new_chat_for_command"))
+            # MCPコマンド実行時は確認なしで新規チャットを開始する
+            # start_new_ai_chat_session_action は messagebox を表示するので、直接呼ぶのは避けるか、
+            # messagebox を表示しないサイレントなバージョンを用意する必要がある。
+            # ここでは、既存の start_new_ai_chat_session_action を呼び、
+            # それが失敗した場合（ユーザーがキャンセルなど）は処理を中断する。
+            # ただし、start_new_ai_chat_session_action はUI操作を伴うため、
+            # このメソッドがどのスレッドから呼ばれるかによっては問題になる可能性がある。
+            # send_ai_chat_message_action から呼ばれるのであればUIスレッドのはず。
+
+            # ユーザーに確認を求める場合 (より安全だが、UIフローが変わる)
+            # confirmed = messagebox.askyesno(
+            #     self._("ai_chat.messagebox.chat_not_started.title"),
+            #     self._("ai_chat.messagebox.mcp_chat_not_started.confirm"), # MCP用の確認メッセージ
+            #     parent=self.root
+            # )
+            # if confirmed:
+            #     self.start_new_ai_chat_session_action()
+            #     if not self.current_ai_chat_file_path:
+            #         self._add_message_to_chat_display_tree("💻 System", self._("ai_chat.mcp.error.cannot_start_chat_session"))
+            #         return
+            # else:
+            #     self._add_message_to_chat_display_tree("💻 System", self._("ai_chat.mcp.error.chat_session_required"))
+            #     return
+
+            # 現状は、通常のチャット開始と同じ動作を期待してそのまま呼び出す
+            # ただし、MCPコマンド前にチャットを開始していない場合、messageboxが出る挙動になる
+            if messagebox.askyesno(self._("ai_chat.messagebox.chat_not_started.title"), self._("ai_chat.messagebox.mcp_chat_not_started.confirm"), parent=self.root):
+                self.start_new_ai_chat_session_action()
+                if not self.current_ai_chat_file_path:
+                     self._add_message_to_chat_display_tree("💻 System", self._("ai_chat.mcp.error.cannot_start_chat_session"))
+                     return
+            else:
+                self._add_message_to_chat_display_tree("💻 System", self._("ai_chat.mcp.error.chat_session_required"))
+                return
+
+        parts = command_input.strip().split(" ", 2) # /mcp <tool_id> <json_params>
+        if len(parts) < 2:
+            self._add_message_to_chat_display_tree("💻 System", self._("ai_chat.mcp.error.invalid_command_format"))
+            return
+
+        tool_id = parts[1]
+        params_str = parts[2] if len(parts) > 2 else "{}"
+        params: dict = {}
+
+        try:
+            params = json.loads(params_str)
+            if not isinstance(params, dict):
+                raise json.JSONDecodeError("パラメータはJSONオブジェクトである必要があります。", params_str, 0)
+        except json.JSONDecodeError as e:
+            self._add_message_to_chat_display_tree("💻 System", self._("ai_chat.mcp.error.invalid_json_params", error=e))
+            return
+
+        self._add_message_to_chat_display_tree(f"👤 User (MCP)", command_input) # MCPコマンド自体もログとして表示
+        self._append_to_current_chat_csv('mcp_command', 'User', command_input) # CSVにも記録
+
+        # MCPツール実行を別スレッドで行う
+        threading.Thread(target=self._execute_mcp_tool_async, args=(tool_id, params), daemon=True).start()
+
+    def _execute_mcp_tool_async(self, tool_id: str, params: dict):
+        """MCPツールを非同期で実行し、結果をチャットに表示する"""
+        self.log(self._("ai_chat.log.mcp_tool_execution_start", tool_id=tool_id, params=params))
+        try:
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+            result = loop.run_until_complete(self.mcp_client_manager.execute_tool(tool_id, params))
+            loop.close()
+
+            if result.get("success"):
+                result_data_str = json.dumps(result.get("data"), ensure_ascii=False, indent=2)
+                base_message_success = self._("ai_chat.mcp.success.tool_executed")
+                message = base_message_success.format(tool_id=tool_id, result=result_data_str)
+                self._add_message_to_chat_display_tree("💻 MCP", message)
+                self._append_to_current_chat_csv('mcp_result', tool_id, result_data_str)
+
+                # ログ用のメッセージも同様にフォーマットする
+                log_message_success_base = self._("ai_chat.log.mcp_tool_execution_success")
+                log_message_success = log_message_success_base.format(tool_id=tool_id, result=result_data_str)
+                self.log(log_message_success)
+            else:
+                error_message_content = result.get("error", "Unknown error")
+                base_message_failed = self._("ai_chat.mcp.error.tool_execution_failed")
+                message = base_message_failed.format(tool_id=tool_id, error=error_message_content)
+                self._add_message_to_chat_display_tree("💻 MCP Error", message)
+                self._append_to_current_chat_csv('mcp_error', tool_id, error_message_content)
+
+                log_message_failed_base = self._("ai_chat.log.mcp_tool_execution_error")
+                log_message_failed = log_message_failed_base.format(tool_id=tool_id, error=error_message_content)
+                self.log(log_message_failed)
+
+        except Exception as e:
+            error_message_exc_content = str(e)
+            base_message_exception = self._("ai_chat.mcp.error.tool_execution_exception")
+            message = base_message_exception.format(tool_id=tool_id, error=error_message_exc_content)
+            self._add_message_to_chat_display_tree("💻 MCP Error", message)
+            self._append_to_current_chat_csv('mcp_error', tool_id, error_message_exc_content)
+
+            log_message_exception_base = self._("ai_chat.log.mcp_tool_execution_exception")
+            log_message_exception = log_message_exception_base.format(tool_id=tool_id, error=error_message_exc_content)
+            self.log(log_message_exception)
+            # UIスレッドでエラーメッセージを表示する場合は self.root.after を使用
+            # self.root.after(0, lambda: messagebox.showerror("MCP Tool Error", f"ツール '{tool_id}' の実行中に例外が発生: {e}", parent=self.root))
+
 
     def _play_user_speech_then_ai_response(self, user_char_name, user_text, ai_char_name_for_next):
         self._play_character_speech_async(user_char_name, user_text, block=True)
