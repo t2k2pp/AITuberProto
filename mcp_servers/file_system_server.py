@@ -1,56 +1,77 @@
 import asyncio
 import json
 import os
+import sys # sysモジュールをインポート
 from pathlib import Path
-from typing import List, Dict, Any, TypedDict # TypedDict を追加
+from typing import List, Dict, Any, TypedDict, Optional # Optional をインポート
+
+# --- 専用ファイルロガー設定 ---
+LOG_DIR = Path(__file__).resolve().parent.parent / "logs"
+LOG_DIR.mkdir(exist_ok=True)
+SERVER_LOG_FILE = LOG_DIR / "filesystem_server.log"
+
+server_logger = logging.getLogger("FileSystemMCPServerProcess") # メインプロセスと異なるロガー名
+server_logger.setLevel(logging.DEBUG)
+# ログが重複して出力されるのを防ぐため、既存のハンドラをクリア (もしあれば)
+if server_logger.hasHandlers():
+    server_logger.handlers.clear()
+fh = logging.FileHandler(SERVER_LOG_FILE, mode='w', encoding='utf-8')
+formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+fh.setFormatter(formatter)
+server_logger.addHandler(fh)
+server_logger.propagate = False # 親ロガーへの伝播を防ぐ
+
+server_logger.info("FileSystemMCPServer process started.")
+server_logger.info(f"Current working directory: {os.getcwd()}")
+server_logger.info(f"Python executable: {sys.executable}")
+server_logger.info(f"sys.path: {sys.path}")
+# --- ロガー設定ここまで ---
+
 
 # MCP SDK のインポート
 try:
     from mcp.server.fastmcp import FastMCP
     from mcp.types import TextContent # TextContent をインポート試行
     MCP_SDK_SERVER_AVAILABLE = True
-    print("Successfully imported MCP SDK server classes (FastMCP, TextContent).")
+    server_logger.info("Successfully imported MCP SDK server classes (FastMCP, TextContent).")
 except ImportError as e:
     MCP_SDK_SERVER_AVAILABLE = False
-    print(f"Warning: Failed to import MCP SDK for Server (FastMCP or TextContent) ({e}). Mocking will be limited for FileSystemMCPServer.")
-    # FastMCP のモックは複雑なので、ここでは単純化する。
-    # SDKなしではこのサーバーは正しく機能しないことを明確にする。
+    server_logger.error(f"Failed to import MCP SDK for Server (FastMCP or TextContent) ({e}). Mocking will be limited.", exc_info=True)
     class FastMCP: # type: ignore
         def __init__(self, name: str, version: str = "0.1.0", stateless_http: bool = False):
             self.name = name
             self.version = version
-            logger.warning("Using Mock FastMCP. Server will not be fully functional.")
+            server_logger.warning("Using Mock FastMCP. Server will not be fully functional.")
         def tool(self, name: Optional[str] = None, description: Optional[str] = None, title: Optional[str] = None):
             def decorator(func):
-                logger.info(f"Mock FastMCP: Tool '{name or func.__name__}' registered (mock).")
+                server_logger.info(f"Mock FastMCP: Tool '{name or func.__name__}' registered (mock).")
                 return func
             return decorator
         def run(self):
-            logger.info("Mock FastMCP: run() called (mock, does nothing).")
+            server_logger.info("Mock FastMCP: run() called (mock, does nothing).")
 
     class TextContent: # type: ignore
          def __init__(self, type:str, text:str):
              self.type = type
              self.text = text
-             logger.info(f"Mock TextContent created with text: {text[:30]}...")
+             server_logger.info(f"Mock TextContent created with text: {text[:30]}...")
 
 
-# ロギング設定
-import logging
-logger = logging.getLogger(__name__)
-if __name__ == '__main__': # このファイルが直接実行される場合のみ基本設定
-    logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+# ロギング設定 (メインのlogger、これはFastMCP内部などで使われる可能性を考慮して残す)
+import logging # logging は既に上でインポート済みだが、スタイルとしてここに書くことも
+logger = logging.getLogger(__name__) # このモジュール用の標準ロガー
+# if __name__ == '__main__': # このファイルが直接実行される場合のみ基本設定
+#    logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+# -> 基本的なbasicConfigはメインアプリ(main.pyやlauncher.py)で行う想定なのでコメントアウト
+# server_logger がファイル出力するので、こちらのloggerはコンソール出力のまま(もしあれば)
 
 # --- グローバルなFastMCPインスタンス ---
-# (ファイルシステムサーバーは通常一つなのでグローバルでも問題ないと判断)
-# サーバー名は config.py のキーと合わせるのが望ましいが、ここでは固定
-mcp_server = FastMCP(name="filesystem-server", version="1.0.1") # バージョンを少し上げる
+mcp_server = FastMCP(name="filesystem-server", version="1.0.1")
+server_logger.info(f"FastMCP instance created: Name='{mcp_server.name}'") # versionはFastMCPが持つか不明なのでログからは削除
 
 # --- ベースディレクトリ設定 ---
-# このサーバーが起動しているスクリプトの場所を基準にする
-# クライアントから渡されるパスはこの base_dir からの相対パスとして解釈する
 BASE_DIR = Path(__file__).resolve().parent.parent
-logger.info(f"FileSystemMCPServer (FastMCP) base directory set to: {BASE_DIR}")
+server_logger.info(f"FileSystemMCPServer (FastMCP) base directory set to: {BASE_DIR}")
 
 
 # --- 型定義 (ツールの出力用) ---
@@ -134,29 +155,27 @@ async def tool_read_file(path: str) -> ReadFileToolOutput: # 戻り値の型ア�
 
 
 # --- サーバー起動 ---
-async def main(): # FastMCPのrunは同期的だが、将来的に非同期になる可能性も考慮
+if __name__ == "__main__":
+    # このファイルを直接 `python file_system_server.py` で実行するとサーバーが起動する
     if not MCP_SDK_SERVER_AVAILABLE:
         logger.critical("MCP SDK (Server) is not available. FileSystemMCPServer cannot start properly.")
         logger.info("This instance will use a mock FastMCP and will not function as a real MCP server.")
-        # モックの場合、mcp_server.run()は実際には何もしないので、ここで終了しても良い
-        # が、他のテストとの整合性のため、一応呼び出す
+        # モックのrun()はブロッキングしないかもしれないので、メッセージを出して終了
+        mcp_server.run() # モックのrunを呼ぶ（何もしない想定）
+        logger.info("Mock FastMCP run finished. Exiting as SDK is not available.")
+        exit()
 
-    # 実際のSDKでは mcp_server.run() がブロッキングするサーバー起動になるはず
-    # (例: uvicorn を内部で使用するなど)
-    # 開発時は mcp dev file_system_server.py のようにCLIから起動することも多い
     try:
-        logger.info(f"Starting FileSystemMCPServer (FastMCP) '{mcp_server.name}'...") # .version 参照を削除
-        # FastMCP().run() は引数なしで、デフォルトでstdioトランスポートを使用するはず
-        # (あるいは、mcp cli から `mcp run file_system_server.py` のように実行されることを想定しているかも)
-        # GitHub README の "Direct Execution" の例では `mcp.run()`
-        # ここでは、このファイルが直接実行された場合にサーバーが起動するようにする
-        mcp_server.run() # これがサーバープロセスを起動し、リクエストを待ち受ける
-        logger.info("FileSystemMCPServer (FastMCP) stopped.") # 通常はrun()が終了するまでここには来ない
+        logger.info(f"Starting FileSystemMCPServer (FastMCP) '{mcp_server.name}'...")
+        # FastMCP.run() がブロッキングしてサーバーを起動するはず
+        mcp_server.run()
+        logger.info("FileSystemMCPServer (FastMCP) stopped.") # 通常はここまで到達しない
     except KeyboardInterrupt:
         logger.info("FileSystemMCPServer (FastMCP) shutting down via KeyboardInterrupt...")
+    except RuntimeError as e:
+        if "Already running asyncio" in str(e): # このエラーは直接実行では起きにくいはずだが念のため
+            logger.error(f"Failed to start server: {e}. This might happen if the script is run in an environment that already has an asyncio loop (e.g. Jupyter). Try running as a standalone script.")
+        else:
+            logger.error(f"An unexpected RuntimeError occurred: {e}", exc_info=True)
     except Exception as e:
         logger.error(f"An error occurred while running FileSystemMCPServer (FastMCP): {e}", exc_info=True)
-
-if __name__ == "__main__":
-    # このファイルを直接 `python file_system_server.py` で実行するとサーバーが起動する
-    asyncio.run(main())
