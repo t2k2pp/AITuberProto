@@ -1,52 +1,79 @@
 import asyncio
 import json
-import subprocess # subprocess をインポート
-import os # os をインポート
+import os
+import subprocess # subprocess は shutdown でプロセスID確認のために残す可能性あり
 from pathlib import Path
 from typing import Dict, Any, Optional, List, Tuple, Callable
 
-# MCP SDK のインポート (ClientSessionなどはsubprocess直接利用時は使わないが、型ヒント用に残す場合もある)
+# MCP SDK のインポート
 try:
-    from mcp.client.session import ClientSession # 今回のテストでは直接は使わない
-    from mcp.client.stdio import StdioServerParameters # 設定読み込みには使う
-    # from mcp.types import Tool, Resource # 必要なら
-    print("Successfully imported MCP SDK classes from 'mcp' package (for type hints or parameters).")
+    from mcp.client.session import ClientSession
+    from mcp.client.stdio import stdio_client, StdioServerParameters
+    from mcp.types import Tool as SDKTool, Resource as SDKResource # SDKが提供する型名に合わせる (仮)
+    # ToolCallResult に相当する型もあればインポート
+    print("Successfully imported MCP SDK classes from 'mcp' package.")
     MCP_SDK_AVAILABLE = True
 except ImportError as e_mcp:
     MCP_SDK_AVAILABLE = False
-    print(f"Warning: Failed to import MCP SDK from 'mcp' package ({e_mcp}). Subprocess test will proceed, but full functionality requires SDK.")
-    # モック定義は subprocess テスト中は不要なので削除またはコメントアウト
-    # class ClientSession: pass
-    class StdioServerParameters: # type: ignore
-        def __init__(self, command: str, args: List[str], env: Optional[Dict[str, str]] = None):
-            self.command = command
-            self.args = args
-            self.env = env if env is not None else {}
-    # Tool = Dict[str, Any]
-    # Resource = Dict[str, Any]
+    print(f"CRITICAL: Failed to import MCP SDK from 'mcp' package ({e_mcp}). MCP functionality will be severely limited or non-functional.")
 
+    # SDKがない場合はフォールバック用のモックを定義 (限定的な動作)
+    class MockClientSession:
+        def __init__(self, read_stream, write_stream, sampling_callback=None, server_name_for_mock: Optional[str] = None):
+            self.name = server_name_for_mock or "mock-session"
+            self._server_name_for_mock = server_name_for_mock
+            logger.info(f"MockClientSession created for {self.name}")
+        async def initialize(self): logger.info(f"MockClientSession {self.name}: Initialized."); await asyncio.sleep(0.01)
+        async def list_tools(self) -> List[Dict[str, Any]]:
+            logger.info(f"MockClientSession {self.name}: list_tools called")
+            if self._server_name_for_mock == "filesystem":
+                 return [{"name": "read_file", "description": "Reads a file (mock_session)"}]
+            return []
+        async def list_resources(self) -> List[Dict[str, Any]]: return []
+        async def call_tool(self, tool_name: str, arguments: Dict[str, Any]) -> Dict[str, Any]:
+            logger.info(f"MockClientSession {self.name}: call_tool '{tool_name}' with args: {arguments}")
+            if self._server_name_for_mock == "filesystem" and tool_name == "read_file" and "path" in arguments:
+                return {"content": [{"type": "text", "text": f"Mock content of {arguments['path']} from MockClientSession"}]}
+            return {"error": f"Mock tool '{tool_name}' failed or not found in MockClientSession"}
+        async def close(self): logger.info(f"MockClientSession {self.name}: Closed."); await asyncio.sleep(0.01)
+
+    class MockStdioServerParameters:
+        def __init__(self, command: str, args: List[str], env: Optional[Dict[str, str]] = None):
+            self.command = command; self.args = args; self.env = env or {}
+
+    class MockStdioClientContextManager:
+        def __init__(self, params: MockStdioServerParameters): self._params = params
+        async def __aenter__(self): return (None, None) # read_stream, write_stream
+        async def __aexit__(self, exc_type, exc_val, exc_tb): pass
+
+    if not MCP_SDK_AVAILABLE: # グローバル名をモックで上書き
+        ClientSession = MockClientSession # type: ignore
+        StdioServerParameters = MockStdioServerParameters # type: ignore
+        stdio_client = MockStdioClientContextManager # type: ignore
+        SDKTool = Dict[str, Any] # type: ignore
+        SDKResource = Dict[str, Any] # type: ignore
 
 import logging
 logger = logging.getLogger(__name__)
 
 class MCPClientManager:
     def __init__(self, config_manager: Optional[Any] = None):
-        # self.sessions: Dict[str, ClientSession] = {} # subprocess直接利用時はClientSessionはまだ作らない
-        self.server_processes: Dict[str, subprocess.Popen] = {} # 起動したサブプロセスを保持
-        self.available_tools: Dict[str, Any] = {} # Anyの代わりにTool型を使いたい
-        self.available_resources: Dict[str, Any] = {} # Anyの代わりにResource型を使いたい
+        self.sessions: Dict[str, ClientSession] = {}
+        self.active_stdio_contexts: Dict[str, Any] = {} # stdio_client のコンテキストマネージャインスタンス
+        self.available_tools: Dict[str, SDKTool] = {} # SDKのTool型を期待
+        self.available_resources: Dict[str, SDKResource] = {} # SDKのResource型を期待
         self.config_manager = config_manager
+        # self.server_processes は stdio_client が管理するので不要になる
 
     def _resolve_server_script_path(self, command: str, raw_args: List[str]) -> List[str]:
+        # (このヘルパーメソッドは変更なし)
         processed_args = []
         if command == "python" and raw_args:
             script_path_arg = raw_args[0]
             try:
                 project_root = Path(__file__).resolve().parent
-                if script_path_arg.startswith('./'):
-                    script_path_arg = script_path_arg[2:]
-                elif script_path_arg.startswith('.\\'):
-                    script_path_arg = script_path_arg[2:]
+                if script_path_arg.startswith('./'): script_path_arg = script_path_arg[2:]
+                elif script_path_arg.startswith('.\\'): script_path_arg = script_path_arg[2:]
                 absolute_script_path = (project_root / script_path_arg).resolve()
                 if absolute_script_path.is_file():
                     processed_args.append(str(absolute_script_path))
@@ -63,8 +90,12 @@ class MCPClientManager:
         return processed_args
 
     async def connect_to_server(self, server_name: str, server_config: Dict[str, Any]) -> None:
-        if server_name in self.server_processes and self.server_processes[server_name].poll() is None:
-            logger.info(f"MCPサーバー \"{server_name}\" のプロセスは既に起動済みか、起動試行中です。")
+        if server_name in self.sessions:
+            logger.info(f"MCPサーバー \"{server_name}\" のセッションは既に確立済みか試行中です。")
+            return
+
+        if not MCP_SDK_AVAILABLE: # SDKがなければ何もしない（またはエラー）
+            logger.critical("MCP SDK is not available. Cannot establish ClientSession.")
             return
 
         try:
@@ -77,76 +108,155 @@ class MCPClientManager:
             if not command or not processed_args:
                 raise ValueError(f"サーバー '{server_name}' のコマンドまたは引数が正しく設定されていません。")
 
-            env_for_subprocess = os.environ.copy() # 現在の環境変数を引き継ぐ
-            env_for_subprocess.update(env_config) # 設定ファイルからの環境変数を上書き/追加
-            env_for_subprocess["PYTHONUNBUFFERED"] = "1" # バッファリング無効を強制
+            effective_env = os.environ.copy()
+            effective_env.update(env_config)
+            effective_env["PYTHONUNBUFFERED"] = "1"
 
-            # PYTHONPATHにカレントディレクトリ（プロジェクトルート想定）を追加してみる
-            # これにより、サブプロセスがモジュールを見つけやすくなるかもしれない
             project_root_str = str(Path(__file__).resolve().parent)
-            existing_pythonpath = env_for_subprocess.get("PYTHONPATH", "")
+            existing_pythonpath = effective_env.get("PYTHONPATH", "")
             if project_root_str not in existing_pythonpath.split(os.pathsep):
-                env_for_subprocess["PYTHONPATH"] = f"{project_root_str}{os.pathsep}{existing_pythonpath}".strip(os.pathsep)
-            logger.info(f"Effective PYTHONPATH for subprocess: {env_for_subprocess.get('PYTHONPATH')}")
+                effective_env["PYTHONPATH"] = f"{project_root_str}{os.pathsep}{existing_pythonpath}".strip(os.pathsep)
 
+            logger.info(f"Attempting to connect to server '{server_name}' using stdio_client:")
+            logger.info(f"  Command: {command}, Args: {processed_args}")
+            logger.info(f"  Env (selected): PYTHONUNBUFFERED={effective_env.get('PYTHONUNBUFFERED')}, PYTHONPATH={effective_env.get('PYTHONPATH')}")
 
-            logger.info(f"Attempting to launch server '{server_name}' via subprocess.Popen:")
-            logger.info(f"  Command: {command}")
-            logger.info(f"  Args: {processed_args}")
-            # Popenのcwdは、スクリプトパスが絶対パスなら不要かもしれないが、念のため設定
-            # スクリプトが自身の位置からの相対パスで何かを読み込む場合に影響する
-            script_dir = Path(processed_args[0]).parent if processed_args else Path(__file__).resolve().parent
-            logger.info(f"  CWD (for Popen): {script_dir}")
-            logger.info(f"  Env (selected items for log): PYTHONUNBUFFERED={env_for_subprocess.get('PYTHONUNBUFFERED')}, PYTHONPATH={env_for_subprocess.get('PYTHONPATH')}")
+            server_params = StdioServerParameters(command=command, args=processed_args, env=effective_env)
 
+            stdio_cm = stdio_client(server_params)
+            self.active_stdio_contexts[server_name] = stdio_cm # __aexit__ のために保持
+            read_stream, write_stream = await stdio_cm.__aenter__()
 
-            # subprocess.PIPE を使うと、communicate() で待つか、非同期で読み出す必要がある
-            # 今回はダミースクリプトがファイルにログを出すので、stdout/stderrはキャプチャせずOSデフォルトへ
-            process = subprocess.Popen(
-                [command] + processed_args,
-                text=True,
-                encoding='utf-8',
-                env=env_for_subprocess,
-                cwd=script_dir, # スクリプトがあるディレクトリをCWDに
-                # stdin=subprocess.DEVNULL, # stdinは使わないので閉じておく (stdio_clientは接続する)
-                # stdout=subprocess.PIPE, # デバッグ用にキャプチャする場合
-                # stderr=subprocess.PIPE  # デバッグ用にキャプチャする場合
-            )
-            self.server_processes[server_name] = process
+            session = ClientSession(read_stream, write_stream)
+            # モックの場合の特別処理はMCP_SDK_AVAILABLEがFalseのブロックに任せる
+            # if not MCP_SDK_AVAILABLE and isinstance(session, MockClientSession):
+            #     session._server_name_for_mock = server_name
 
-            logger.info(f"Subprocess for '{server_name}' launched with PID: {process.pid}. Waiting a few seconds for it to initialize and create log files...")
-            await asyncio.sleep(5) # 5秒待機
+            await session.initialize()
+            await self._discover_server_capabilities(session, server_name)
 
-            logger.info(f"Subprocess test for '{server_name}' finished waiting. Please check for 'logs/dummy_server_startup.log' and 'logs/dummy_server_flag.txt'.")
-
-            retcode = process.poll()
-            if retcode is not None:
-                logger.warning(f"Subprocess for '{server_name}' exited early with code: {retcode}")
-                # もしstdout/stderrをPIPEにしていればここで読み出せる
-                # stdout_data, stderr_data = process.communicate(timeout=1)
-                # logger.info(f"Subprocess stdout: {stdout_data}")
-                # logger.error(f"Subprocess stderr: {stderr_data}")
-            else:
-                logger.info(f"Subprocess for '{server_name}' is still running.")
+            self.sessions[server_name] = session
+            logger.info(f"MCPサーバー \"{server_name}\" とのセッションを正常に確立しました。")
 
         except Exception as e:
-            logger.error(f"Error launching or interacting with subprocess for server '{server_name}': {e}", exc_info=True)
+            logger.error(f"MCPサーバー \"{server_name}\" への接続エラー: {e}", exc_info=True)
+            if server_name in self.active_stdio_contexts:
+                try:
+                    await self.active_stdio_contexts[server_name].__aexit__(type(e), e, e.__traceback__)
+                except Exception as e_exit:
+                    logger.error(f"Error during __aexit__ for {server_name} after connection error: {e_exit}")
+                del self.active_stdio_contexts[server_name]
 
-    async def _discover_server_capabilities(self, session: Any, server_name: str) -> None: # sessionの型をAnyに
-        # このテスト中は呼び出されない想定
-        logger.info("_discover_server_capabilities called, but not functional in subprocess test mode.")
-        pass
+
+    async def _discover_server_capabilities(self, session: ClientSession, server_name: str) -> None:
+        try:
+            tools_list: List[SDKTool] = await session.list_tools() # SDKのTool型を期待
+            logger.info(f"Raw tools_response from server '{server_name}': {tools_list}")
+            if tools_list:
+                for tool_obj in tools_list:
+                    # SDKToolがどのような属性を持つか (name, description, inputSchemaなど) はSDK仕様による
+                    # ここでは tool_obj が .name, .description 属性を持つと仮定
+                    if hasattr(tool_obj, 'name'):
+                        tool_id = f"{server_name}:{tool_obj.name}"
+                        self.available_tools[tool_id] = tool_obj # Toolオブジェクトをそのまま保存
+                        logger.info(f"ツール発見: {tool_id} (Description: {getattr(tool_obj, 'description', 'N/A')})")
+                    else:
+                        logger.warning(f"Received tool object without a 'name' attribute: {tool_obj}")
+            else:
+                logger.info(f"サーバー \"{server_name}\" からツール情報は提供されませんでした (空またはNone)。")
+
+            resources_list: List[SDKResource] = await session.list_resources()
+            logger.info(f"Raw resources_response from server '{server_name}': {resources_list}")
+            if resources_list:
+                for res_obj in resources_list:
+                    if hasattr(res_obj, 'uri'):
+                        res_id = f"{server_name}:{res_obj.uri}"
+                        self.available_resources[res_id] = res_obj
+                        logger.info(f"リソース発見: {res_id} (Description: {getattr(res_obj, 'description', 'N/A')})")
+                    else:
+                        logger.warning(f"Received resource object without a 'uri' attribute: {res_obj}")
+            else:
+                logger.info(f"サーバー \"{server_name}\" からリソース情報は提供されませんでした (空またはNone)。")
+
+        except Exception as e:
+            logger.error(f"サーバー \"{server_name}\" の機能発見中にエラー: {e}", exc_info=True)
 
     async def execute_tool(self, tool_id: str, parameters: Dict[str, Any]) -> Dict[str, Any]:
-        # このテスト中は呼び出されない想定
-        logger.info(f"execute_tool '{tool_id}' called, but not functional in subprocess test mode.")
-        return {"success": False, "error": "Not functional in subprocess test mode"}
+        if tool_id not in self.available_tools:
+            logger.error(f"ツール \"{tool_id}\" が見つかりません。利用可能なツール: {list(self.available_tools.keys())}")
+            # 利用可能なツールの詳細もログに出す
+            for tid, t_obj in self.available_tools.items():
+                logger.debug(f"Available tool detail: ID={tid}, Name={getattr(t_obj, 'name', 'N/A')}")
+            raise ValueError(f"ツール \"{tool_id}\" が見つかりません。")
+
+        tool_obj = self.available_tools[tool_id]
+        server_name = tool_id.split(":", 1)[0] # tool_id からサーバー名を取得 (より堅牢な方法も検討可)
+        original_tool_name = getattr(tool_obj, 'name', None)
+
+        if not original_tool_name:
+             raise ValueError(f"ツールオブジェクト '{tool_id}' にname属性がありません。")
+
+        session = self.sessions.get(server_name)
+        if not session:
+            raise ConnectionError(f"サーバー \"{server_name}\" のセッションが接続されていません。")
+
+        try:
+            logger.info(f"ツール \"{original_tool_name}\" (ID: {tool_id}) をパラメータ {parameters} で実行します。")
+            result = await session.call_tool(tool_name=original_tool_name, arguments=parameters)
+            logger.info(f"ツール \"{tool_id}\" の実行結果 (RAW from SDK): {result}")
+            return self._process_tool_result(result)
+        except Exception as e:
+            logger.error(f"ツール \"{tool_id}\" の実行エラー: {e}", exc_info=True)
+            raise RuntimeError(f"ツール \"{tool_id}\" の実行に失敗しました: {e}")
 
     def _process_tool_result(self, result: Any) -> Dict[str, Any]:
-        # このテスト中は呼び出されない想定
-        return {}
+        # result は session.call_tool() の戻り値。SDKの型を想定。
+        # GitHub README "Writing MCP Clients" -> "Call a tool" の例では result の型は不明。
+        # mcp-integration-guide.md (JS SDK) では result.content や result.error を想定。
+        # FastMCPサーバーのツールが返す型 (例: ReadFileToolOutput) がどうラップされてくるか。
+        # ReadFileToolOutput は {"content": [{"type": "text", "text": "..."}]}
+
+        # 最も可能性が高いのは、result がこの辞書そのもの、あるいはそれに近い属性を持つオブジェクト。
+        if hasattr(result, 'content'): # ガイドのJS SDKに近いケース
+            content_data = result.content
+        elif isinstance(result, dict) and 'content' in result: # Python dictの場合
+            content_data = result['content']
+        elif hasattr(result, 'result') and isinstance(result.result, str): # プリミティブラッパーの可能性
+             return {"success": True, "data": result.result}
+        elif isinstance(result, str): # 単純な文字列が返ってきた場合
+             return {"success": True, "data": result}
+        else: # 不明な形式、またはエラー
+            if hasattr(result, 'error'):
+                error_msg = str(result.error)
+            elif isinstance(result, dict) and 'error' in result:
+                error_msg = str(result['error'])
+            else:
+                logger.warning(f"ツール結果の解釈に失敗。未知の形式またはエラー情報なし: {result}")
+                # エラーとして扱うのが安全か
+                return {"success": False, "error": f"未知のツール結果形式: {str(result)[:100]}"}
+
+            logger.error(f"ツール実行エラー (サーバーからのエラー): {error_msg}")
+            return {"success": False, "error": error_msg, "details": str(result)}
+
+        # content_data の処理 (mcp-integration-guide.md のクライアント側処理に準拠)
+        processed_content = content_data
+        if isinstance(content_data, list) and len(content_data) > 0 and \
+           isinstance(content_data[0], dict) and "text" in content_data[0]:
+            processed_content = content_data[0]["text"]
+        elif isinstance(content_data, dict) and "text" in content_data and content_data.get("type") == "text": # TextContentオブジェクトのような辞書の場合
+            processed_content = content_data["text"]
+        # TextContent_SDK オブジェクトの場合 (もしSDKがオブジェクトを直接返すなら)
+        # elif MCP_SDK_AVAILABLE and TextContent_SDK and isinstance(content_data, TextContent_SDK):
+        #    processed_content = content_data.text
+
+        return {
+            "success": True,
+            "data": processed_content,
+            "metadata": getattr(result, 'metadata', {}) if hasattr(result, 'metadata') else (result.get("metadata", {}) if isinstance(result, dict) else {})
+        }
 
     async def initialize_servers_from_config(self) -> None:
+        # (このメソッドは変更なし)
         if not self.config_manager:
             logger.warning("ConfigManagerが設定されていません。MCPサーバーの初期化をスキップします。")
             return
@@ -157,8 +267,6 @@ class MCPClientManager:
         for server_name, server_settings in mcp_config["servers"].items():
             if isinstance(server_settings, dict) and server_settings.get("enabled", True):
                 try:
-                    # connect_to_server は非同期なので create_task で並行実行も可能だが、
-                    # ここでは順次実行（デバッグしやすいため）
                     await self.connect_to_server(server_name, server_settings)
                 except Exception as e:
                     logger.error(f"サーバー \"{server_name}\" の初期化(connect_to_server呼び出し)中にエラー: {e}", exc_info=True)
@@ -166,26 +274,34 @@ class MCPClientManager:
                 logger.info(f"サーバー \"{server_name}\" は無効化されているか、設定が不正です。スキップします。")
 
     async def shutdown(self) -> None:
-        logger.info("全てのMCPサーバープロセスをシャットダウンします...")
-        for server_name, process in list(self.server_processes.items()):
-            if process.poll() is None: # プロセスがまだ実行中なら
-                logger.info(f"Terminating server process '{server_name}' (PID: {process.pid})...")
-                process.terminate() # SIGTERM を送信
-                try:
-                    process.wait(timeout=5) # 最大5秒待つ
-                    logger.info(f"Server process '{server_name}' terminated with code {process.returncode}.")
-                except subprocess.TimeoutExpired:
-                    logger.warning(f"Server process '{server_name}' did not terminate in time, killing...")
-                    process.kill() # 強制終了
-                    logger.info(f"Server process '{server_name}' killed.")
-                except Exception as e:
-                    logger.error(f"Error during server process '{server_name}' shutdown: {e}", exc_info=True)
-            else:
-                logger.info(f"Server process '{server_name}' already exited with code {process.returncode}.")
-            del self.server_processes[server_name]
+        logger.info("全てのMCPクライアントセッションと関連プロセスをシャットダウンします...")
+        for server_name, session in list(self.sessions.items()):
+            try:
+                await session.close()
+                logger.info(f"サーバー \"{server_name}\" とのセッションを正常にクローズしました。")
+            except Exception as e:
+                logger.error(f"サーバー \"{server_name}\" とのセッションクローズ中にエラー: {e}", exc_info=True)
+            # ClientSession.close() が transport/process の終了も管理することを期待
+            # そうでない場合は、active_stdio_contexts から対応する context を見つけて __aexit__ する必要がある
+            if server_name in self.active_stdio_contexts:
+                 logger.info(f"stdio_client context for {server_name} should be exited by session.close().")
+                 # await self.active_stdio_contexts[server_name].__aexit__(None, None, None)
+                 # del self.active_stdio_contexts[server_name] # __aexit__が呼ばれたら削除
+            del self.sessions[server_name]
+
+        # もし session.close() で context が終了しない場合に備えて残りの context も処理
+        for server_name, stdio_cm_instance in list(self.active_stdio_contexts.items()):
+            logger.warning(f"stdio_client context for {server_name} was not cleaned up by session.close(). Attempting explicit __aexit__.")
+            try:
+                await stdio_cm_instance.__aexit__(None, None, None)
+                logger.info(f"サーバー \"{server_name}\" のstdioプロセスコンテキストを正常に終了しました。")
+            except Exception as e:
+                logger.error(f"サーバー \"{server_name}\" のstdioプロセスコンテキスト終了中にエラー: {e}", exc_info=True)
+            finally:
+                del self.active_stdio_contexts[server_name]
 
         self.available_tools.clear()
         self.available_resources.clear()
         logger.info("MCPクライアントのシャットダウンが完了しました。")
 
-# (main_test はSDKの具体的なAPIが判明してから書き直す必要があるため一旦コメントアウト)
+# (main_test はコメントアウトのまま)
