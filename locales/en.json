@@ -806,6 +806,27 @@
         "debug.log.ai_chat_test_error": "❌ AI chat test error: {e}",
         "debug.log.local_llm_request_start": "🤖 {char_name}: Sending request to Local LLM ({endpoint_url})...",
         "debug.log.local_llm_call_error": "❌ Local LLM call error ({endpoint_url}): {e}",
-        "debug.log.prefix_log": "[LOG] "
+        "debug.log.prefix_log": "[LOG] ",
+        "communication_log.title": "Communication Details Log",
+        "communication_log.button.refresh": "Refresh",
+        "communication_log.button.save_snapshot": "Save Current Display to File (Snapshot)",
+        "communication_log.button.clear_memory": "Clear In-Memory Logs",
+        "communication_log.session_file_label.default": "Session Log: Undetermined",
+        "communication_log.session_file_label.recording": "Recording: {filename}",
+        "communication_log.log_empty": "Session log file '{filename}' is empty.\n",
+        "communication_log.log_read_error": "Error reading session log file '{filename}': {error}\n",
+        "communication_log.messagebox.read_error.title": "Read Error",
+        "communication_log.messagebox.read_error.message": "Failed to read log file:\n{filepath}\nError: {error}",
+        "communication_log.log_not_found_default": "Session log file not found.",
+        "communication_log.log_not_found_specific": "Session log file '{filename}' not found.\nIt will be created when the application starts logging.",
+        "communication_log.session_file_label.waiting": "Waiting to record: {filename}",
+        "communication_log.session_file_label.path_not_set": "Session Log: Path not set",
+        "communication_log.input_dialog.clear_memory.text": "Clear only in-memory communication logs?\nThis will not affect the active session log file.\nThe target for snapshot saving will be cleared.\nEnter 'yes' to confirm.",
+        "communication_log.input_dialog.clear_memory.title": "Confirm Clear Memory Logs",
+        "communication_log.messagebox.clear_success.title": "Clear Complete",
+        "communication_log.messagebox.clear_success.message": "In-memory logs have been cleared.\nPress 'Refresh' to update the display.\nThe session log file has not been affected.",
+        "communication_log.messagebox.clear_canceled.title": "Clear Canceled",
+        "communication_log.messagebox.clear_canceled.message": "Clearing of in-memory logs was canceled because the input did not match 'yes'.",
+        "common.yes": "yes"
     }
 }
