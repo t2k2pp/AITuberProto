@@ -859,6 +859,25 @@
         "debug.log.ai_chat_test_error": "❌ AI対話テストエラー: {e}",
         "debug.log.local_llm_request_start": "🤖 {char_name}: ローカルLLM ({endpoint_url}) にリクエスト送信中...",
         "debug.log.local_llm_call_error": "❌ ローカルLLM呼び出しエラー ({endpoint_url}): {e}",
-        "debug.log.prefix_log": "[LOG] "
+        "debug.log.prefix_log": "[LOG] ",
+        "ai_chat.log.mcp_server_init_start": "MCPサーバーの初期化を開始します...",
+        "ai_chat.log.mcp_server_init_success": "MCPサーバーの初期化に成功しました。",
+        "ai_chat.log.mcp_server_init_error": "MCPサーバーの初期化中にエラーが発生しました: {error}",
+        "ai_chat.log.shutting_down_mcp": "MCPクライアントのシャットダウンを開始します...",
+        "ai_chat.log.mcp_shutdown_complete": "MCPクライアントのシャットダウンが完了しました。",
+        "ai_chat.log.mcp_shutdown_error": "MCPクライアントのシャットダウン中にエラーが発生しました: {error}",
+        "ai_chat.mcp.error.invalid_command_format": "MCPコマンドの形式が不正です。例: /mcp <tool_id> {\"param\": \"value\"}",
+        "ai_chat.mcp.error.invalid_json_params": "MCPコマンドのパラメータJSONが無効です: {error}",
+        "ai_chat.log.mcp_tool_execution_start": "MCPツール '{tool_id}' の実行を開始します。パラメータ: {params}",
+        "ai_chat.mcp.success.tool_executed": "MCPツール '{tool_id}' が正常に実行されました。\n結果:\n{result}",
+        "ai_chat.log.mcp_tool_execution_success": "MCPツール '{tool_id}' の実行に成功しました。結果: {result}",
+        "ai_chat.mcp.error.tool_execution_failed": "MCPツール '{tool_id}' の実行に失敗しました。\nエラー: {error}",
+        "ai_chat.log.mcp_tool_execution_error": "MCPツール '{tool_id}' の実行エラー (サーバーからのエラー): {error}",
+        "ai_chat.mcp.error.tool_execution_exception": "MCPツール '{tool_id}' の実行中にクライアント側で例外が発生しました。\nエラー: {error}",
+        "ai_chat.log.mcp_tool_execution_exception": "MCPツール '{tool_id}' の実行例外: {error}",
+        "ai_chat.log.mcp_auto_new_chat_for_command": "MCPコマンド実行のため、新規チャットセッションを開始/確認します。",
+        "ai_chat.messagebox.mcp_chat_not_started.confirm": "MCPコマンドを実行するにはチャットセッションが必要です。新規に作成しますか？",
+        "ai_chat.mcp.error.cannot_start_chat_session": "チャットセッションを開始できませんでした。MCPコマンドは実行できません。",
+        "ai_chat.mcp.error.chat_session_required": "MCPコマンドの実行にはチャットセッションの開始が必要です。"
     }
 }
