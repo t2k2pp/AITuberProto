@@ -325,29 +325,20 @@ class HelpWindow:
 
         customtkinter.CTkLabel(engine_guide_frame, text=self._("help_window.engine_guide.title"), font=self.label_font).pack(anchor="w", padx=10, pady=(5,5))
 
-        guide_content = f"""{self._("help_window.engine_guide.content.overview_title")}
-{self._("help_window.engine_guide.content.overview_text")}
-
----
-
-{self._("help_window.engine_guide.content.google_ai_title")}
-{self._("help_window.engine_guide.content.google_ai_text")}
-
-{self._("help_window.engine_guide.content.avis_speech_title")}
-{self._("help_window.engine_guide.content.avis_speech_text")}
-
-{self._("help_window.engine_guide.content.voicevox_title")}
-{self._("help_window.engine_guide.content.voicevox_text")}
-
-{self._("help_window.engine_guide.content.system_tts_title")}
-{self._("help_window.engine_guide.content.system_tts_text")}
-
-{self._("help_window.engine_guide.content.troubleshooting_title")}
-{self._("help_window.engine_guide.content.troubleshooting_text")}
-"""
         guide_text_widget = customtkinter.CTkTextbox(engine_guide_frame, wrap="word", font=self.text_font)
         guide_text_widget.pack(fill="both", expand=True, padx=5, pady=5)
-        guide_text_widget.insert("1.0", guide_content.strip())
+        guide_text_widget.insert("end", self._("help_window.engine_guide.content.overview_title") + "\n")
+        guide_text_widget.insert("end", self._("help_window.engine_guide.content.overview_text") + "\n\n---\n\n")
+        guide_text_widget.insert("end", self._("help_window.engine_guide.content.google_ai_title") + "\n")
+        guide_text_widget.insert("end", self._("help_window.engine_guide.content.google_ai_text") + "\n\n")
+        guide_text_widget.insert("end", self._("help_window.engine_guide.content.avis_speech_title") + "\n")
+        guide_text_widget.insert("end", self._("help_window.engine_guide.content.avis_speech_text") + "\n\n")
+        guide_text_widget.insert("end", self._("help_window.engine_guide.content.voicevox_title") + "\n")
+        guide_text_widget.insert("end", self._("help_window.engine_guide.content.voicevox_text") + "\n\n")
+        guide_text_widget.insert("end", self._("help_window.engine_guide.content.system_tts_title") + "\n")
+        guide_text_widget.insert("end", self._("help_window.engine_guide.content.system_tts_text") + "\n\n")
+        guide_text_widget.insert("end", self._("help_window.engine_guide.content.troubleshooting_title") + "\n")
+        guide_text_widget.insert("end", self._("help_window.engine_guide.content.troubleshooting_text") + "\n")
         guide_text_widget.configure(state="disabled")
 
         # 外部リンクボタンフレーム (エンジン起動ガイドタブ内)

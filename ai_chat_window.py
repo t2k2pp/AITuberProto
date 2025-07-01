@@ -201,7 +201,7 @@ class AIChatWindow:
 
     def populate_chat_character_dropdowns(self):
         all_chars_data = self.character_manager.get_all_characters()
-        char_names = [data.get('name', 'Unknown') for data in all_chars_data.values()]
+        char_names = [data.get('name', self._("ai_chat.dropdown.unknown_character_name")) for data in all_chars_data.values()]
         no_char_text = self._("ai_chat.dropdown.no_character")
 
         self.ai_char_combo.configure(values=char_names if char_names else [no_char_text])
@@ -353,12 +353,12 @@ class AIChatWindow:
                     for row in reader:
                         if row.get('action') == 'talk':
                             speaker, msg = row.get('talker'), row.get('words')
-                            # TODO: "あなた" の部分も国際化が必要かもしれないが、プロンプトの一部なので一旦保留
-                            prefix = "あなた" if speaker == ai_char_name else user_char_name_for_history
+                            prefix = self._("ai_chat.prompt.ai_self_prefix") if speaker == ai_char_name else user_char_name_for_history
                             chat_history_for_prompt.append(f"{prefix}: {msg}")
             history_str = "\n".join(chat_history_for_prompt[-10:])
-            # TODO: プロンプト内の固定文字列も国際化検討
-            full_prompt = f"{ai_prompt}\n\n以下はこれまでの会話です:\n{history_str}\n\n{user_char_name_for_history}: {user_input_text}\n\nあなた ({ai_char_name}):"
+            prompt_history_header = self._("ai_chat.prompt.history_header")
+            prompt_ai_turn_prefix = self._("ai_chat.prompt.ai_self_prefix")
+            full_prompt = f"{ai_prompt}\n\n{prompt_history_header}\n{history_str}\n\n{user_char_name_for_history}: {user_input_text}\n\n{prompt_ai_turn_prefix} ({ai_char_name}):"
             text_gen_model = self.config.get_system_setting("text_generation_model", "gemini-1.5-flash")
             ai_response_text = self._("ai_chat.message.error_getting_response") # デフォルトのエラーメッセージ
 

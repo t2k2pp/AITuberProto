@@ -152,9 +152,9 @@ class CharacterEditDialog:
         customtkinter.CTkLabel(quality_frame_inner, text=self._("character_edit_dialog.label.speech_quality"), font=self.default_font).pack(side="left", padx=(0,10))
         self.quality_var = tk.StringVar(value="標準") # valueは内部キーなのでそのまま
         quality_values_map = {"標準": self._("character_edit_dialog.quality.standard"), "高品質": self._("character_edit_dialog.quality.high")}
-        quality_combo = customtkinter.CTkComboBox(quality_frame_inner, variable=self.quality_var,
-                                    values=list(quality_values_map.values()), # 表示は翻訳後
-                                    state="readonly", width=150, font=self.default_font)
+        # quality_combo = customtkinter.CTkComboBox(quality_frame_inner, variable=self.quality_var,
+        #                             values=list(quality_values_map.values()), # 表示は翻訳後
+        #                             state="readonly", width=150, font=self.default_font)
         # quality_varとComboBoxのvalueが異なるため、選択時に内部キーに変換する処理が必要になるが、今回はStringVarの値をそのまま使う
         # そのため、valuesも内部キーのままにして、表示は別途更新するか、StringVarに翻訳後の値をセットする必要がある。
         # ここではStringVarの値を内部キーとして扱い、表示は翻訳しない方針で一度進め、問題あれば修正する。
@@ -662,7 +662,8 @@ class CharacterManagementWindow:
         characters = self.character_manager.get_all_characters()
         for char_id, data in characters.items():
             self.char_tree.insert('', 'end', iid=char_id, values=(
-                data.get('name', 'Unknown'), self._estimate_character_type(data), # _estimate_character_type で翻訳
+                data.get('name', self._("character_manager.unknown_char_name_fallback")),
+                self._estimate_character_type(data), # _estimate_character_type で翻訳
                 data.get('voice_settings', {}).get('model', 'N/A'),
                 data.get('voice_settings', {}).get('engine', 'N/A'),
                 data.get('created_at', 'N/A')
@@ -766,7 +767,7 @@ class CharacterManagementWindow:
         filepath = filedialog.asksaveasfilename(
             defaultextension=".json",
             filetypes=[(self._("character_manager.filedialog.export_character.filetype"), "*.json")],
-            initialfile=f"{char_data.get('name', 'character').replace(' ', '_')}.json",
+            initialfile=f"{char_data.get('name', self._('character_manager.default_export_char_filename')).replace(' ', '_')}.json",
             title=self._("character_manager.filedialog.export_character.title"), parent=self.root
         )
         if filepath:
