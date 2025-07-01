@@ -21,9 +21,9 @@ Google AI Studio新音声合成（2025年5月追加）+ Avis Speech + VOICEVOX +
 
 import tkinter as tk
 from tkinter import ttk, messagebox, filedialog, simpledialog
-from google import genai # 公式ドキュメント推奨
-from google.genai import types # 公式ドキュメント推奨
-#import google.generativeai as genai # コメントアウト
+#from google import genai # 公式ドキュメント推奨
+#from google.genai import types # 公式ドキュメント推奨
+import google.generativeai as genai
 import requests
 import asyncio
 import json

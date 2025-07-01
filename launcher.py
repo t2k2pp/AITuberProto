@@ -4,8 +4,16 @@ import sys
 import os
 import tkinter.messagebox
 import tkinter as tk
-import pygetwindow # 追加
 import time # 追加
+
+# pygetwindow の条件付きインポート
+if not sys.platform.startswith("linux"):
+    try:
+        import pygetwindow
+    except ImportError:
+        pygetwindow = None # インポート失敗時は None に設定
+else:
+    pygetwindow = None # Linuxでは使用しないため None
 
 # CommunicationLogWindow と CommunicationLogger をインポート
 from communication_log_window import CommunicationLogWindow
@@ -192,16 +200,25 @@ class LauncherWindow:
             if process_data["process"].poll() is None:
                 print(f"{module_name} is already running.")
                 try:
-                    # ウィンドウタイトルでウィンドウを検索してアクティブ化
-                    target_window = pygetwindow.getWindowsWithTitle(window_title)
-                    if target_window:
-                        win = target_window[0]
-                        if win.isMinimized:
-                            win.restore()
-                        win.activate()
-                        print(f"Activated window: {window_title}")
+                    if pygetwindow: # pygetwindowがインポートされている場合のみ実行
+                        if sys.platform.startswith("linux"): # Linuxの場合はpygetwindowがNoneのはずだが念のため
+                            print("Window activation is not supported on Linux (pygetwindow module logic). Skipping.")
+                            tkinter.messagebox.showinfo(_("launcher.info.title"), _("launcher.info.already_running_activation_failed", module_name=module_name, error="Not supported on Linux (pygetwindow check)"))
+                        else:
+                            # ウィンドウタイトルでウィンドウを検索してアクティブ化
+                            target_window = pygetwindow.getWindowsWithTitle(window_title)
+                            if target_window:
+                                win = target_window[0]
+                                if win.isMinimized:
+                                    win.restore()
+                                win.activate()
+                                print(f"Activated window: {window_title}")
+                            else:
+                                tkinter.messagebox.showinfo(_("launcher.info.title"), _("launcher.info.window_not_found", window_title=window_title))
                     else:
-                        tkinter.messagebox.showinfo(_("launcher.info.title"), _("launcher.info.window_not_found", window_title=window_title))
+                        print("pygetwindow is not available. Skipping window activation.")
+                        # pygetwindow がない場合もユーザーに通知
+                        tkinter.messagebox.showinfo(_("launcher.info.title"), _("launcher.info.already_running_activation_failed", module_name=module_name, error="pygetwindow not available"))
                 except Exception as e:
                     print(f"Error activating window {window_title}: {e}")
                     tkinter.messagebox.showinfo(_("launcher.info.title"), _("launcher.info.already_running_activation_failed", module_name=module_name, error=e))
