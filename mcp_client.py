@@ -1,6 +1,7 @@
 import asyncio
 import json
 import subprocess # subprocess をインポート
+import os # os をインポート
 from pathlib import Path
 from typing import Dict, Any, Optional, List, Tuple, Callable
 
