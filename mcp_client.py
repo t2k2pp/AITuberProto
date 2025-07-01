@@ -1,5 +1,6 @@
 import asyncio
 import json
+from pathlib import Path # Pathをインポート
 from typing import Dict, Any, Optional, List, Tuple, Callable
 
 # MCP SDK のインポート
@@ -113,13 +114,40 @@ class MCPClientManager:
             logger.info(f"MCPサーバー \"{server_name}\" への接続を開始します。設定: {server_config}")
 
             command = server_config.get("command")
-            args = server_config.get("args", [])
+            raw_args = server_config.get("args", [])
             env = server_config.get("env", {})
+
+            processed_args = []
+            if command == "python" and raw_args:
+                script_path_arg = raw_args[0]
+                try:
+                    project_root = Path(__file__).resolve().parent # mcp_client.py がプロジェクトルート直下にある想定
+
+                    # './' や '.\' で始まっている場合、それを除去 (os.path.normpathでも良いが、確実性のため)
+                    if script_path_arg.startswith('./'):
+                        script_path_arg = script_path_arg[2:]
+                    elif script_path_arg.startswith('.\\'):
+                        script_path_arg = script_path_arg[2:]
+
+                    absolute_script_path = (project_root / script_path_arg).resolve() # resolve()で正規化と存在確認(シンボリックリンク等)
+
+                    if absolute_script_path.is_file(): # resolve()後にis_file()で実ファイルか確認
+                        processed_args.append(str(absolute_script_path))
+                        processed_args.extend(raw_args[1:])
+                        logger.info(f"Resolved server script path to: {absolute_script_path}")
+                    else:
+                        logger.warning(f"Server script path {script_path_arg} (resolved to {absolute_script_path}) does not exist or is not a file. Using raw args: {raw_args}")
+                        processed_args = list(raw_args)
+                except Exception as path_e:
+                    logger.error(f"Error resolving server script path '{script_path_arg}': {path_e}. Using raw args: {raw_args}", exc_info=True)
+                    processed_args = list(raw_args)
+            else:
+                processed_args = list(raw_args)
 
             if not command:
                 raise ValueError(f"サーバー '{server_name}' の 'command' 設定がありません。")
 
-            server_params = StdioServerParameters(command=command, args=args, env=env)
+            server_params = StdioServerParameters(command=command, args=processed_args, env=env)
 
             # stdio_client を非同期コンテキストマネージャとして使用
             # self.active_stdio_contexts にコンテキストを保存し、shutdownで解放する
