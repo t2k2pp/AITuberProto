@@ -807,6 +807,27 @@
         "debug.log.ai_chat_test_error": "❌ AI対話テストエラー: {e}",
         "debug.log.local_llm_request_start": "🤖 {char_name}: ローカルLLM ({endpoint_url}) にリクエスト送信中...",
         "debug.log.local_llm_call_error": "❌ ローカルLLM呼び出しエラー ({endpoint_url}): {e}",
-        "debug.log.prefix_log": "[LOG] "
+        "debug.log.prefix_log": "[LOG] ",
+        "communication_log.title": "通信詳細ログ",
+        "communication_log.button.refresh": "更新",
+        "communication_log.button.save_snapshot": "現在の表示内容をファイルに保存 (スナップショット)",
+        "communication_log.button.clear_memory": "メモリ上のログをクリア",
+        "communication_log.session_file_label.default": "セッションログ: 未定",
+        "communication_log.session_file_label.recording": "記録中: {filename}",
+        "communication_log.log_empty": "セッションログファイル '{filename}' は空です。\n",
+        "communication_log.log_read_error": "セッションログファイル '{filename}' の読み込みエラー: {error}\n",
+        "communication_log.messagebox.read_error.title": "読込エラー",
+        "communication_log.messagebox.read_error.message": "ログファイルの読み込みに失敗しました:\n{filepath}\nエラー: {error}",
+        "communication_log.log_not_found_default": "セッションログファイルが見つかりません。",
+        "communication_log.log_not_found_specific": "セッションログファイル '{filename}' が見つかりません。\nアプリケーションがログを記録し始めると作成されます。",
+        "communication_log.session_file_label.waiting": "記録待機中: {filename}",
+        "communication_log.session_file_label.path_not_set": "セッションログ: パス未設定",
+        "communication_log.input_dialog.clear_memory.text": "メモリ上の通信ログのみをクリアしますか？\n記録中のセッションログファイルには影響しません。\nスナップショット保存の対象がクリアされます。\nよろしければ「はい」と入力してください。",
+        "communication_log.input_dialog.clear_memory.title": "メモリログクリア確認",
+        "communication_log.messagebox.clear_success.title": "クリア完了",
+        "communication_log.messagebox.clear_success.message": "メモリ上のログはクリアされました。\n表示を更新するには「更新」ボタンを押してください。\nセッションログファイルは影響を受けていません。",
+        "communication_log.messagebox.clear_canceled.title": "クリア中止",
+        "communication_log.messagebox.clear_canceled.message": "入力が「はい」と一致しなかったため、メモリ上のログはクリアされませんでした。",
+        "common.yes": "はい"
     }
 }
