@@ -5,4 +5,5 @@ requests # settings_window.py などで使われているため
 chardet # 文字コード自動判別用
 python-i18n # 国際化対応ライブラリ
 aiohttp # config.py で使用
+mcp[cli] # 公式MCP SDK (CLIツール含む)
 # 他の依存関係も必要に応じてここに追加していきます (例: pydub, sounddevice など)
