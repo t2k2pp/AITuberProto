@@ -130,16 +130,16 @@ if mcp_server:
             raise
 
 # --- サーバー起動 ---
-if __name__ == "__main__":
-    if not MCP_SDK_SERVER_AVAILABLE or mcp_server is None:
-        server_logger.critical("MCP SDK not available or FastMCP server not initialized. Cannot start.")
-        exit(1)
-    try:
-        server_logger.info(f"Starting FileSystemMCPServer (FastMCP) '{getattr(mcp_server, 'name', 'N/A')}'...")
-        mcp_server.run()
-        server_logger.info("mcp_server.run() has unexpectedly returned without blocking.") # このログが出力されるか確認
-        server_logger.info("FileSystemMCPServer (FastMCP) stopped.")
-    except KeyboardInterrupt:
-        server_logger.info("FileSystemMCPServer (FastMCP) shutting down via KeyboardInterrupt...")
-    except Exception as e:
-        server_logger.error(f"An error occurred while running FileSystemMCPServer (FastMCP): {e}", exc_info=True)
+# if __name__ == "__main__":
+#     if not MCP_SDK_SERVER_AVAILABLE or mcp_server is None:
+#         server_logger.critical("MCP SDK not available or FastMCP server not initialized. Cannot start.")
+#         exit(1)
+#     try:
+#         server_logger.info(f"Starting FileSystemMCPServer (FastMCP) '{getattr(mcp_server, 'name', 'N/A')}'...")
+#         mcp_server.run()
+#         server_logger.info("mcp_server.run() has unexpectedly returned without blocking.") # このログが出力されるか確認
+#         server_logger.info("FileSystemMCPServer (FastMCP) stopped.")
+#     except KeyboardInterrupt:
+#         server_logger.info("FileSystemMCPServer (FastMCP) shutting down via KeyboardInterrupt...")
+#     except Exception as e:
+#         server_logger.error(f"An error occurred while running FileSystemMCPServer (FastMCP): {e}", exc_info=True)
