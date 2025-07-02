@@ -117,11 +117,28 @@ class MCPClientManager:
             if project_root_str not in existing_pythonpath.split(os.pathsep):
                 effective_env["PYTHONPATH"] = f"{project_root_str}{os.pathsep}{existing_pythonpath}".strip(os.pathsep)
 
-            logger.info(f"Attempting to connect to server '{server_name}' using stdio_client:")
-            logger.info(f"  Command: {command}, Args: {processed_args}")
-            logger.info(f"  Env (selected): PYTHONUNBUFFERED={effective_env.get('PYTHONUNBUFFERED')}, PYTHONPATH={effective_env.get('PYTHONPATH')}")
+            logger.info(f"Attempting to connect to server '{server_name}' using stdio_client (via 'mcp run' CLI):")
 
-            server_params = StdioServerParameters(command=command, args=processed_args, env=effective_env)
+            # processed_args にはスクリプトのフルパスと、もしあれば追加の引数が入っている
+            # command は "python" のまま raw_args[0] がスクリプトパスだった
+            # これを "mcp" "run" "<script_path>" ... に変える
+
+            if command == "python" and processed_args: # 元のコマンドがpythonで、スクリプトパスが解決済みの場合
+                script_full_path = processed_args[0]
+                remaining_args = processed_args[1:]
+
+                cli_command = "mcp" # SDKのCLIコマンド
+                cli_args = ["run", script_full_path] + remaining_args
+
+                logger.info(f"  CLI Command: {cli_command}, Args: {cli_args}")
+                logger.info(f"  Env (selected): PYTHONUNBUFFERED={effective_env.get('PYTHONUNBUFFERED')}, PYTHONPATH={effective_env.get('PYTHONPATH')}")
+                server_params = StdioServerParameters(command=cli_command, args=cli_args, env=effective_env)
+            else:
+                # 元のコマンドがpythonでないか、引数が解決できなかった場合は、従来通り試みる (フォールバック)
+                logger.warning(f"Original command was not 'python' or args were not processed as expected. Falling back to direct command execution.")
+                logger.info(f"  Fallback Command: {command}, Args: {processed_args}")
+                logger.info(f"  Env (selected): PYTHONUNBUFFERED={effective_env.get('PYTHONUNBUFFERED')}, PYTHONPATH={effective_env.get('PYTHONPATH')}")
+                server_params = StdioServerParameters(command=command, args=processed_args, env=effective_env)
 
             stdio_cm = stdio_client(server_params)
             self.active_stdio_contexts[server_name] = stdio_cm # __aexit__ のために保持
