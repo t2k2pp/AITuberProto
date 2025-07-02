@@ -137,6 +137,7 @@ if __name__ == "__main__":
     try:
         server_logger.info(f"Starting FileSystemMCPServer (FastMCP) '{getattr(mcp_server, 'name', 'N/A')}'...")
         mcp_server.run()
+        server_logger.info("mcp_server.run() has unexpectedly returned without blocking.") # このログが出力されるか確認
         server_logger.info("FileSystemMCPServer (FastMCP) stopped.")
     except KeyboardInterrupt:
         server_logger.info("FileSystemMCPServer (FastMCP) shutting down via KeyboardInterrupt...")

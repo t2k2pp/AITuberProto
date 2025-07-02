@@ -132,7 +132,10 @@ class MCPClientManager:
             # if not MCP_SDK_AVAILABLE and isinstance(session, MockClientSession):
             #     session._server_name_for_mock = server_name
 
-            await session.initialize()
+            logger.info(f"Attempting session.initialize() for '{server_name}'...")
+            init_result = await session.initialize() # MCPハンドシェイク
+            logger.info(f"Session for '{server_name}' initialized. Result (if any): {init_result}")
+
             await self._discover_server_capabilities(session, server_name)
 
             self.sessions[server_name] = session
@@ -150,8 +153,9 @@ class MCPClientManager:
 
     async def _discover_server_capabilities(self, session: ClientSession, server_name: str) -> None:
         try:
+            logger.info(f"Attempting to call session.list_tools() for server '{server_name}'...")
             tools_list: List[SDKTool] = await session.list_tools() # SDKのTool型を期待
-            logger.info(f"Raw tools_response from server '{server_name}': {tools_list}")
+            logger.info(f"Raw tools_list from session.list_tools() for server '{server_name}': {tools_list} (Type: {type(tools_list)})")
             if tools_list:
                 for tool_obj in tools_list:
                     # SDKToolがどのような属性を持つか (name, description, inputSchemaなど) はSDK仕様による
