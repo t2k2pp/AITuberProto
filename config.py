@@ -135,12 +135,12 @@ class ConfigManager:
             ],
             "mcp_settings": { # MCP設定セクション
                 "servers": {
-                    "filesystem": {
+                    "filesystem": { # このキーを一時的にEchoサーバーのテストに使う
                         "enabled": True,
-                        "command": "python",
-                        "args": ["./mcp_servers/file_system_server.py"], # アプリルートからの相対パス想定
-                        "env": {"PYTHONUNBUFFERED": "1"},
-                        "description": "ローカルファイルシステム操作用サーバー"
+                        "command": "mcp", # SDKのCLIランナーを使用
+                        "args": ["run", "./mcp_servers/echo_server_mcp.py"], # 新しいechoサーバーを指定
+                        "env": {"PYTHONUNBUFFERED": "1"}, # 必要に応じてPYTHONPATHなどもここに設定できる
+                        "description": "一時的なEchoテストサーバー (本来はfilesystem)"
                     }
                     # 例: "another_server": { "enabled": False, "command": "node", "args": ["./mcp_servers/another_server.js"] }
                 },
