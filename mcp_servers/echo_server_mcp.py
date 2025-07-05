@@ -41,19 +41,22 @@ if mcp_instance:
 else:
     echo_server_logger.warning("mcp_instance is None, 'echo' tool cannot be defined.")
 
-echo_server_logger.info("echo_server_mcp.py loaded. If run via 'mcp run', it should pick up 'mcp_instance'.")
+echo_server_logger.info("echo_server_mcp.py loaded. Attempting to run mcp_instance if it exists.")
 
-# `mcp run` で実行されることを期待するため、if __name__ == "__main__": ブロックは書かない。
-# `mcp run` はこのファイルで見つかったFastMCPインスタンス (ここでは `mcp_instance`) を
-# 自動的に実行するはず。
-# もし `python echo_server_mcp.py` で直接実行したい場合は、以下のようなブロックが必要。
-# if __name__ == "__main__":
-#     if mcp_instance:
-#         echo_server_logger.info("Starting EchoMCPServer directly via __main__.")
-#         try:
-#             mcp_instance.run() # FastMCP.run() はブロッキングする
-#             echo_server_logger.info("EchoMCPServer run() finished.")
-#         except Exception as e:
-#             echo_server_logger.error(f"Error running EchoMCPServer directly: {e}", exc_info=True)
-#     else:
-#         echo_server_logger.error("FastMCP instance not created. Cannot run server.")
+if mcp_instance:
+    echo_server_logger.info(f"Attempting to explicitly call mcp_instance.run() for '{getattr(mcp_instance, 'name', 'N/A')}'")
+    try:
+        # この呼び出しがサーバーを起動し、リクエストを待ち受ける（ブロッキングする）はず
+        mcp_instance.run()
+        echo_server_logger.info(f"mcp_instance.run() for '{getattr(mcp_instance, 'name', 'N/A')}' finished.")
+    except Exception as e_run:
+        echo_server_logger.error(f"Error during explicit mcp_instance.run(): {e_run}", exc_info=True)
+else:
+    echo_server_logger.error("mcp_instance is None at the end of the script. Server cannot run.")
+
+# `mcp run` で実行される場合、このファイルがモジュールとしてインポートされ、
+# グローバルスコープの mcp_instance が `mcp run` コマンドによって実行されることを期待している。
+# 一方で、`python echo_server_mcp.py` のように直接実行された場合にもサーバーが起動するように、
+# このようにファイルの末尾で run() を呼び出す形にする。
+# SDKの `mcp run` がこの末尾の run() 呼び出しをどう扱うか（二重呼び出しにならないか等）は
+# やや不明瞭だが、まずはサーバーが待ち受け状態になることを優先する。
