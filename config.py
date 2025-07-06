@@ -135,14 +135,27 @@ class ConfigManager:
             ],
             "mcp_settings": { # MCP設定セクション
                 "servers": {
-                    "filesystem": { # このキーを一時的にEchoサーバーのテストに使う
+                    "filesystem": {
                         "enabled": True,
-                        "command": "mcp", # SDKのCLIランナーを使用
-                        "args": ["run", "./mcp_servers/echo_server_mcp.py"], # 新しいechoサーバーを指定
-                        "env": {"PYTHONUNBUFFERED": "1"}, # 必要に応じてPYTHONPATHなどもここに設定できる
-                        "description": "一時的なEchoテストサーバー (本来はfilesystem)"
+                        "command": "python",
+                        "args": ["./mcp_servers/file_system_server.py"],
+                        "env": {"PYTHONUNBUFFERED": "1"},
+                        "description": "File system operations server"
+                    },
+                    "echo": {
+                        "enabled": False,
+                        "command": "python", 
+                        "args": ["./mcp_servers/echo_server_mcp.py"],
+                        "env": {"PYTHONUNBUFFERED": "1"},
+                        "description": "Echo test server (disabled by default)"
+                    },
+                    "playwright": {
+                        "enabled": false,
+                        "command": "npx",
+                        "args": ["-y", "@modelcontextprotocol/server-playwright"],
+                        "env": {"NODE_ENV": "production"},
+                        "description": "Playwright web automation server"
                     }
-                    # 例: "another_server": { "enabled": False, "command": "node", "args": ["./mcp_servers/another_server.js"] }
                 },
                 "client_options": {
                     "default_timeout": 30 # 秒: ツール呼び出しなどのタイムアウト

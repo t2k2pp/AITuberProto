@@ -540,6 +540,24 @@ class AIChatWindow:
                 self.root.after(0, self._add_message_to_chat_display_tree, f"🤖 {ai_char_name}", self._("ai_chat.message.google_api_key_not_set"))
                 return
 
+            # MCP機能統合：ユーザーメッセージの分析とツール実行
+            mcp_analysis_result = {"needs_tools": False, "tool_results": [], "tools_used": [], "analysis_text": ""}
+            try:
+                loop = asyncio.new_event_loop()
+                asyncio.set_event_loop(loop)
+                try:
+                    mcp_analysis_result = loop.run_until_complete(
+                        self._analyze_message_for_mcp_tools(user_input_text, ai_char_name)
+                    )
+                    if mcp_analysis_result.get("needs_tools", False):
+                        self.log(f"MCP analysis: {mcp_analysis_result.get('analysis_text', 'Tool execution required')}")
+                        self.log(f"Tools used: {', '.join(mcp_analysis_result.get('tools_used', []))}")
+                finally:
+                    loop.close()
+            except Exception as mcp_error:
+                self.log(f"MCP analysis failed: {mcp_error}")
+                # MCPエラーが発生しても通常のAI応答は継続
+
             client = genai.Client(api_key=api_key)
             ai_prompt = self.character_manager.get_character_prompt(ai_char_id)
             chat_history_for_prompt = []
@@ -554,7 +572,13 @@ class AIChatWindow:
             history_str = "\n".join(chat_history_for_prompt[-10:])
             prompt_history_header = self._("ai_chat.prompt.history_header")
             prompt_ai_turn_prefix = self._("ai_chat.prompt.ai_self_prefix")
-            full_prompt = f"{ai_prompt}\n\n{prompt_history_header}\n{history_str}\n\n{user_char_name_for_history}: {user_input_text}\n\n{prompt_ai_turn_prefix} ({ai_char_name}):"
+            
+            # MCPツール実行結果を含めたプロンプト構築
+            full_prompt = self._build_prompt_with_mcp_results(
+                ai_prompt, history_str, prompt_history_header, prompt_ai_turn_prefix,
+                user_char_name_for_history, user_input_text, ai_char_name, mcp_analysis_result
+            )
+            
             text_gen_model = self.config.get_system_setting("text_generation_model", "gemini-1.5-flash")
             ai_response_text = self._("ai_chat.message.error_getting_response") # デフォルトのエラーメッセージ
 
@@ -573,7 +597,7 @@ class AIChatWindow:
                         loop.close()
             else:
                 gemini_response = client.models.generate_content(model=text_gen_model, contents=full_prompt,
-                                                               generation_config=genai_types.GenerateContentConfig(temperature=0.8, max_output_tokens=200))
+                                                               generation_config=genai_types.GenerateContentConfig(temperature=0.8, max_output_tokens=400))
                 ai_response_text = gemini_response.text.strip() if gemini_response.text else self._("ai_chat.message.ai_generic_error_response")
 
             # ログ記録: AIからのレスポンス
@@ -610,6 +634,225 @@ class AIChatWindow:
         except Exception as e_llm:
             self.log(self._("ai_chat.log.local_llm_call_error", char_name=char_name, endpoint_url=endpoint_url, e_llm=e_llm))
             return self._("ai_chat.message.local_llm_call_error", e_llm=e_llm)
+
+    async def _analyze_message_for_mcp_tools(self, user_message: str, ai_char_name: str) -> dict:
+        """ユーザーメッセージを分析し、MCPツールが必要かどうかを判断して実行する"""
+        analysis_result = {
+            "needs_tools": False,
+            "tool_results": [],
+            "tools_used": [],
+            "analysis_text": "",
+            "error": None
+        }
+
+        try:
+            # MCPクライアントマネージャーの初期化チェック
+            if not hasattr(self, 'mcp_client_manager') or self.mcp_client_manager is None:
+                self.log("MCPクライアントマネージャーが初期化されていません。")
+                analysis_result["error"] = "MCP client not initialized"
+                return analysis_result
+
+            # 利用可能なMCPツールを取得
+            available_tools = list(self.mcp_client_manager.available_tools.keys())
+            if not available_tools:
+                self.log("利用可能なMCPツールがありません。MCPサーバーが起動していない可能性があります。")
+                analysis_result["error"] = "No MCP tools available"
+                return analysis_result
+
+            # AIにメッセージ分析を依頼
+            api_key = self.config.get_system_setting("google_ai_api_key")
+            if not api_key:
+                return analysis_result
+
+            client = genai.Client(api_key=api_key)
+            
+            # ツール説明を生成
+            tool_descriptions = []
+            for tool_id in available_tools:
+                tool_obj = self.mcp_client_manager.available_tools.get(tool_id, {})
+                if hasattr(tool_obj, 'description'):
+                    desc = tool_obj.description
+                elif isinstance(tool_obj, dict) and 'description' in tool_obj:
+                    desc = tool_obj['description']
+                else:
+                    # ツール名からデフォルト説明を生成
+                    if 'read_file' in tool_id:
+                        desc = 'ファイルの内容を読み取ります'
+                    elif 'playwright' in tool_id:
+                        desc = 'Webページを開いて情報を取得します'
+                    elif 'screenshot' in tool_id:
+                        desc = 'Webページのスクリーンショットを撮影します'
+                    elif 'click' in tool_id:
+                        desc = 'Webページの要素をクリックします'
+                    elif 'type' in tool_id:
+                        desc = 'Webページに文字を入力します'
+                    else:
+                        desc = 'ツールの説明なし'
+                tool_descriptions.append(f"- {tool_id}: {desc}")
+            
+            analysis_prompt = f"""以下のユーザーメッセージを分析して、外部ツールを使用する必要があるかどうかを判断してください。
+
+利用可能なツール:
+{chr(10).join(tool_descriptions)}
+
+ユーザーメッセージ: "{user_message}"
+
+以下のJSON形式で回答してください:
+{{
+    "needs_tools": true/false,
+    "recommended_tools": [
+        {{
+            "tool_id": "ツールID",
+            "purpose": "使用目的",
+            "parameters": {{"param1": "value1"}}
+        }}
+    ],
+    "reasoning": "判断理由"
+}}
+
+判断基準:
+- ファイルの読み取り、データの検索が必要な場合 → filesystem ツール
+- Webページの情報取得、スクリーンショット、Web操作が必要な場合 → playwright ツール
+- 一般的な質問や会話の場合 → tools: false"""
+
+            analysis_response = client.models.generate_content(
+                model="gemini-1.5-flash",
+                contents=analysis_prompt,
+                generation_config=genai_types.GenerateContentConfig(temperature=0.3, max_output_tokens=300)
+            )
+
+            if not analysis_response.text:
+                return analysis_result
+
+            # JSONレスポンスをパース
+            try:
+                import re
+                # JSONブロックを抽出
+                json_match = re.search(r'\{.*\}', analysis_response.text, re.DOTALL)
+                if json_match:
+                    analysis_data = json.loads(json_match.group())
+                    
+                    analysis_result["analysis_text"] = analysis_data.get("reasoning", "")
+                    
+                    if analysis_data.get("needs_tools", False):
+                        analysis_result["needs_tools"] = True
+                        
+                        # 推奨ツールを実行
+                        recommended_tools = analysis_data.get("recommended_tools", [])
+                        for tool_info in recommended_tools:
+                            tool_id = tool_info.get("tool_id")
+                            parameters = tool_info.get("parameters", {})
+                            purpose = tool_info.get("purpose", "")
+                            
+                            if tool_id in available_tools:
+                                try:
+                                    self.log(f"MCPツール '{tool_id}' を実行中: {purpose}")
+                                    
+                                    # ツール実行にタイムアウトを設定
+                                    tool_result = await asyncio.wait_for(
+                                        self.mcp_client_manager.execute_tool(tool_id, parameters),
+                                        timeout=30  # 30秒タイムアウト
+                                    )
+                                    
+                                    if tool_result.get("success", False):
+                                        self.log(f"MCPツール '{tool_id}' 実行成功")
+                                    else:
+                                        self.log(f"MCPツール '{tool_id}' 実行失敗: {tool_result.get('error', 'Unknown error')}")
+                                    
+                                    analysis_result["tool_results"].append({
+                                        "tool_id": tool_id,
+                                        "purpose": purpose,
+                                        "parameters": parameters,
+                                        "result": tool_result,
+                                        "success": tool_result.get("success", False)
+                                    })
+                                    analysis_result["tools_used"].append(tool_id)
+                                    
+                                except asyncio.TimeoutError:
+                                    error_msg = f"Tool execution timeout after 30 seconds"
+                                    self.log(f"MCPツール '{tool_id}' タイムアウト")
+                                    analysis_result["tool_results"].append({
+                                        "tool_id": tool_id,
+                                        "purpose": purpose,
+                                        "parameters": parameters,
+                                        "result": {"success": False, "error": error_msg},
+                                        "success": False
+                                    })
+                                except Exception as e:
+                                    error_msg = f"Tool execution error: {str(e)}"
+                                    self.log(f"MCPツール '{tool_id}' 実行エラー: {e}")
+                                    analysis_result["tool_results"].append({
+                                        "tool_id": tool_id,
+                                        "purpose": purpose,
+                                        "parameters": parameters,
+                                        "result": {"success": False, "error": error_msg},
+                                        "success": False
+                                    })
+                            else:
+                                self.log(f"推奨ツール '{tool_id}' は利用できません")
+                
+            except (json.JSONDecodeError, KeyError) as e:
+                self.log(f"AIからの分析結果のパースに失敗: {e}")
+                
+        except Exception as e:
+            self.log(f"MCPツール分析中にエラー: {e}")
+
+        return analysis_result
+
+    def _build_prompt_with_mcp_results(self, ai_prompt: str, history_str: str, prompt_history_header: str, 
+                                     prompt_ai_turn_prefix: str, user_char_name: str, user_input_text: str, 
+                                     ai_char_name: str, mcp_analysis_result: dict) -> str:
+        """MCPツール実行結果を含めたAIプロンプトを構築する"""
+        
+        base_prompt = f"{ai_prompt}\n\n{prompt_history_header}\n{history_str}\n\n{user_char_name}: {user_input_text}"
+        
+        # MCPエラーがある場合は通知
+        if mcp_analysis_result.get("error"):
+            base_prompt += f"\n\n[注意: 外部ツールは現在利用できません ({mcp_analysis_result['error']})]"
+        
+        # MCPツール実行結果がある場合は追加
+        elif mcp_analysis_result.get("needs_tools", False) and mcp_analysis_result.get("tool_results"):
+            successful_results = []
+            failed_results = []
+            
+            for tool_result in mcp_analysis_result["tool_results"]:
+                if tool_result.get("success", False):
+                    successful_results.append(tool_result)
+                else:
+                    failed_results.append(tool_result)
+            
+            if successful_results or failed_results:
+                base_prompt += "\n\n--- 外部ツール実行結果 ---"
+                
+                # 成功した結果を先に表示
+                for tool_result in successful_results:
+                    tool_id = tool_result["tool_id"]
+                    purpose = tool_result["purpose"]
+                    result = tool_result["result"]
+                    result_data = result.get("data", "")
+                    
+                    base_prompt += f"\n\n[ツール: {tool_id}]"
+                    base_prompt += f"\n目的: {purpose}"
+                    base_prompt += f"\n実行結果: {str(result_data)[:1000]}"  # 長すぎる結果は切り詰める
+                
+                # 失敗した結果は簡潔に表示
+                if failed_results:
+                    base_prompt += f"\n\n[注意: {len(failed_results)}個のツールが実行に失敗しました]"
+                    for tool_result in failed_results:
+                        tool_id = tool_result["tool_id"]
+                        error_msg = tool_result["result"].get("error", "不明なエラー")
+                        base_prompt += f"\n- {tool_id}: {error_msg[:100]}"
+                
+                base_prompt += "\n\n--- ツール実行結果ここまで ---"
+                
+                if successful_results:
+                    base_prompt += "\n\n上記のツール実行結果を参考にして、ユーザーの質問に適切に回答してください。"
+                else:
+                    base_prompt += "\n\nツールの実行に失敗しましたが、可能な範囲でユーザーの質問に回答してください。"
+        
+        base_prompt += f"\n\n{prompt_ai_turn_prefix} ({ai_char_name}):"
+        
+        return base_prompt
 
     def _play_character_speech_async(self, char_name, text, block=False):
         char_id = self.character_manager.get_character_id_by_name(char_name)

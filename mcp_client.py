@@ -1,69 +1,75 @@
 import asyncio
 import json
 import os
-import subprocess # subprocess は shutdown でプロセスID確認のために残す可能性あり
+import subprocess
 from pathlib import Path
-from typing import Dict, Any, Optional, List, Tuple, Callable
+from typing import Dict, Any, Optional, List, Union
+import logging
 
-# MCP SDK のインポート
+logger = logging.getLogger(__name__)
+
+# MCP SDK のインポート（簡潔版）
+MCP_SDK_AVAILABLE = False
+ClientSession = None
+stdio_client = None
+StdioServerParameters = None
+
 try:
     from mcp.client.session import ClientSession
     from mcp.client.stdio import stdio_client, StdioServerParameters
-    from mcp.types import Tool as SDKTool, Resource as SDKResource # SDKが提供する型名に合わせる (仮)
-    # ToolCallResult に相当する型もあればインポート
-    print("Successfully imported MCP SDK classes from 'mcp' package.")
+    from mcp.types import Tool, Resource
     MCP_SDK_AVAILABLE = True
-except ImportError as e_mcp:
-    MCP_SDK_AVAILABLE = False
-    print(f"CRITICAL: Failed to import MCP SDK from 'mcp' package ({e_mcp}). MCP functionality will be severely limited or non-functional.")
-
-    # SDKがない場合はフォールバック用のモックを定義 (限定的な動作)
+    logger.info("Successfully imported MCP SDK classes.")
+except ImportError as e:
+    logger.warning(f"MCP SDK not available: {e}. Some MCP functionality will be limited.")
+    
+    # シンプルなモッククラス
     class MockClientSession:
-        def __init__(self, read_stream, write_stream, sampling_callback=None, server_name_for_mock: Optional[str] = None):
-            self.name = server_name_for_mock or "mock-session"
-            self._server_name_for_mock = server_name_for_mock
-            logger.info(f"MockClientSession created for {self.name}")
-        async def initialize(self): logger.info(f"MockClientSession {self.name}: Initialized."); await asyncio.sleep(0.01)
-        async def list_tools(self) -> List[Dict[str, Any]]:
-            logger.info(f"MockClientSession {self.name}: list_tools called")
-            if self._server_name_for_mock == "filesystem":
-                 return [{"name": "read_file", "description": "Reads a file (mock_session)"}]
+        def __init__(self, *args, **kwargs):
+            self.name = "mock-session"
+            
+        async def initialize(self):
+            logger.info("Mock session initialized")
+            
+        async def list_tools(self):
+            return [{"name": "mock_tool", "description": "Mock tool for testing"}]
+            
+        async def list_resources(self):
             return []
-        async def list_resources(self) -> List[Dict[str, Any]]: return []
-        async def call_tool(self, tool_name: str, arguments: Dict[str, Any]) -> Dict[str, Any]:
-            logger.info(f"MockClientSession {self.name}: call_tool '{tool_name}' with args: {arguments}")
-            if self._server_name_for_mock == "filesystem" and tool_name == "read_file" and "path" in arguments:
-                return {"content": [{"type": "text", "text": f"Mock content of {arguments['path']} from MockClientSession"}]}
-            return {"error": f"Mock tool '{tool_name}' failed or not found in MockClientSession"}
-        async def close(self): logger.info(f"MockClientSession {self.name}: Closed."); await asyncio.sleep(0.01)
-
+            
+        async def call_tool(self, tool_name: str, arguments: Dict[str, Any]):
+            return {"content": [{"type": "text", "text": f"Mock result for {tool_name}"}]}
+            
+        async def close(self):
+            logger.info("Mock session closed")
+    
     class MockStdioServerParameters:
         def __init__(self, command: str, args: List[str], env: Optional[Dict[str, str]] = None):
-            self.command = command; self.args = args; self.env = env or {}
-
-    class MockStdioClientContextManager:
-        def __init__(self, params: MockStdioServerParameters): self._params = params
-        async def __aenter__(self): return (None, None) # read_stream, write_stream
-        async def __aexit__(self, exc_type, exc_val, exc_tb): pass
-
-    if not MCP_SDK_AVAILABLE: # グローバル名をモックで上書き
-        ClientSession = MockClientSession # type: ignore
-        StdioServerParameters = MockStdioServerParameters # type: ignore
-        stdio_client = MockStdioClientContextManager # type: ignore
-        SDKTool = Dict[str, Any] # type: ignore
-        SDKResource = Dict[str, Any] # type: ignore
-
-import logging
-logger = logging.getLogger(__name__)
+            self.command = command
+            self.args = args
+            self.env = env or {}
+    
+    class MockStdioClient:
+        def __init__(self, params):
+            self.params = params
+            
+        async def __aenter__(self):
+            return None, None  # read_stream, write_stream
+            
+        async def __aexit__(self, exc_type, exc_val, exc_tb):
+            pass
+    
+    ClientSession = MockClientSession
+    StdioServerParameters = MockStdioServerParameters
+    stdio_client = MockStdioClient
 
 class MCPClientManager:
     def __init__(self, config_manager: Optional[Any] = None):
-        self.sessions: Dict[str, ClientSession] = {}
-        self.active_stdio_contexts: Dict[str, Any] = {} # stdio_client のコンテキストマネージャインスタンス
-        self.available_tools: Dict[str, SDKTool] = {} # SDKのTool型を期待
-        self.available_resources: Dict[str, SDKResource] = {} # SDKのResource型を期待
+        self.sessions: Dict[str, Any] = {}
+        self.stdio_contexts: Dict[str, Any] = {}
+        self.available_tools: Dict[str, Any] = {}
+        self.available_resources: Dict[str, Any] = {}
         self.config_manager = config_manager
-        # self.server_processes は stdio_client が管理するので不要になる
 
     def _resolve_server_script_path(self, command: str, raw_args: List[str]) -> List[str]:
         # (このヘルパーメソッドは変更なし)
@@ -91,238 +97,247 @@ class MCPClientManager:
 
     async def connect_to_server(self, server_name: str, server_config: Dict[str, Any]) -> None:
         if server_name in self.sessions:
-            logger.info(f"MCPサーバー \"{server_name}\" のセッションは既に確立済みか試行中です。")
-            return
-
-        if not MCP_SDK_AVAILABLE: # SDKがなければ何もしない（またはエラー）
-            logger.critical("MCP SDK is not available. Cannot establish ClientSession.")
+            logger.info(f"MCPサーバー '{server_name}' は既に接続済みです。")
             return
 
         try:
-            command = server_config.get("command")
+            command = server_config.get("command", "python")
             raw_args = server_config.get("args", [])
-            env_config = server_config.get("env", {}).copy()
+            env_config = server_config.get("env", {})
 
+            # 引数を処理してスクリプトパスを解決
             processed_args = self._resolve_server_script_path(command, raw_args)
+            
+            if not processed_args:
+                raise ValueError(f"サーバー '{server_name}' の設定が不正です。")
 
-            if not command or not processed_args:
-                raise ValueError(f"サーバー '{server_name}' のコマンドまたは引数が正しく設定されていません。")
-
+            # 環境変数を設定
             effective_env = os.environ.copy()
             effective_env.update(env_config)
             effective_env["PYTHONUNBUFFERED"] = "1"
+            
+            # プロジェクトルートをPYTHONPATHに追加
+            project_root = str(Path(__file__).resolve().parent)
+            pythonpath = effective_env.get("PYTHONPATH", "")
+            if project_root not in pythonpath:
+                effective_env["PYTHONPATH"] = f"{project_root}{os.pathsep}{pythonpath}".strip(os.pathsep)
 
-            project_root_str = str(Path(__file__).resolve().parent)
-            existing_pythonpath = effective_env.get("PYTHONPATH", "")
-            if project_root_str not in existing_pythonpath.split(os.pathsep):
-                effective_env["PYTHONPATH"] = f"{project_root_str}{os.pathsep}{existing_pythonpath}".strip(os.pathsep)
+            logger.info(f"Connecting to MCP server '{server_name}': {command} {' '.join(processed_args)}")
 
-            logger.info(f"Attempting to connect to server '{server_name}' using stdio_client (via 'mcp run' CLI):")
+            # StdioServerParametersでサーバープロセスを設定
+            server_params = StdioServerParameters(
+                command=command,
+                args=processed_args,
+                env=effective_env
+            )
 
-            # processed_args にはスクリプトのフルパスと、もしあれば追加の引数が入っている
-            # command は "python" のまま raw_args[0] がスクリプトパスだった
-            # これを "mcp" "run" "<script_path>" ... に変える
-
-            if command == "python" and processed_args: # 元のコマンドがpythonで、スクリプトパスが解決済みの場合
-                script_full_path = processed_args[0]
-                remaining_args = processed_args[1:]
-
-                cli_command = "mcp" # SDKのCLIコマンド
-                cli_args = ["run", script_full_path] + remaining_args
-
-                logger.info(f"  CLI Command: {cli_command}, Args: {cli_args}")
-                logger.info(f"  Env (selected): PYTHONUNBUFFERED={effective_env.get('PYTHONUNBUFFERED')}, PYTHONPATH={effective_env.get('PYTHONPATH')}")
-                server_params = StdioServerParameters(command=cli_command, args=cli_args, env=effective_env)
-            else:
-                # 元のコマンドがpythonでないか、引数が解決できなかった場合は、従来通り試みる (フォールバック)
-                logger.warning(f"Original command was not 'python' or args were not processed as expected. Falling back to direct command execution.")
-                logger.info(f"  Fallback Command: {command}, Args: {processed_args}")
-                logger.info(f"  Env (selected): PYTHONUNBUFFERED={effective_env.get('PYTHONUNBUFFERED')}, PYTHONPATH={effective_env.get('PYTHONPATH')}")
-                server_params = StdioServerParameters(command=command, args=processed_args, env=effective_env)
-
-            stdio_cm = stdio_client(server_params)
-            self.active_stdio_contexts[server_name] = stdio_cm # __aexit__ のために保持
-            read_stream, write_stream = await stdio_cm.__aenter__()
-
+            # stdio_clientでサーバーに接続
+            stdio_context = stdio_client(server_params)
+            self.stdio_contexts[server_name] = stdio_context
+            
+            read_stream, write_stream = await stdio_context.__aenter__()
+            
+            # ClientSessionを作成
             session = ClientSession(read_stream, write_stream)
-            # モックの場合の特別処理はMCP_SDK_AVAILABLEがFalseのブロックに任せる
-            # if not MCP_SDK_AVAILABLE and isinstance(session, MockClientSession):
-            #     session._server_name_for_mock = server_name
-
-            logger.info(f"Attempting session.initialize() for '{server_name}'...")
-            init_result = await session.initialize() # MCPハンドシェイク
-            logger.info(f"Session for '{server_name}' initialized. Result (if any): {init_result}")
-
+            
+            # セッション初期化
+            logger.info(f"Initializing session for '{server_name}'...")
+            await session.initialize()
+            
+            # サーバーの機能を発見
             await self._discover_server_capabilities(session, server_name)
-
+            
             self.sessions[server_name] = session
-            logger.info(f"MCPサーバー \"{server_name}\" とのセッションを正常に確立しました。")
+            logger.info(f"MCPサーバー '{server_name}' に正常に接続しました。")
 
         except Exception as e:
-            logger.error(f"MCPサーバー \"{server_name}\" への接続エラー: {e}", exc_info=True)
-            if server_name in self.active_stdio_contexts:
+            logger.error(f"MCPサーバー '{server_name}' への接続に失敗: {e}", exc_info=True)
+            # クリーンアップ
+            if server_name in self.stdio_contexts:
                 try:
-                    await self.active_stdio_contexts[server_name].__aexit__(type(e), e, e.__traceback__)
-                except Exception as e_exit:
-                    logger.error(f"Error during __aexit__ for {server_name} after connection error: {e_exit}")
-                del self.active_stdio_contexts[server_name]
+                    await self.stdio_contexts[server_name].__aexit__(type(e), e, e.__traceback__)
+                except Exception:
+                    pass
+                del self.stdio_contexts[server_name]
+            raise
 
 
-    async def _discover_server_capabilities(self, session: ClientSession, server_name: str) -> None:
+    async def _discover_server_capabilities(self, session: Any, server_name: str) -> None:
         try:
-            logger.info(f"Attempting to call session.list_tools() for server '{server_name}'...")
-            tools_list: List[SDKTool] = await session.list_tools() # SDKのTool型を期待
-            logger.info(f"Raw tools_list from session.list_tools() for server '{server_name}': {tools_list} (Type: {type(tools_list)})")
-            if tools_list:
-                for tool_obj in tools_list:
-                    # SDKToolがどのような属性を持つか (name, description, inputSchemaなど) はSDK仕様による
-                    # ここでは tool_obj が .name, .description 属性を持つと仮定
-                    if hasattr(tool_obj, 'name'):
-                        tool_id = f"{server_name}:{tool_obj.name}"
-                        self.available_tools[tool_id] = tool_obj # Toolオブジェクトをそのまま保存
-                        logger.info(f"ツール発見: {tool_id} (Description: {getattr(tool_obj, 'description', 'N/A')})")
-                    else:
-                        logger.warning(f"Received tool object without a 'name' attribute: {tool_obj}")
+            logger.info(f"Discovering capabilities for server '{server_name}'...")
+            
+            # ツール一覧を取得
+            tools_response = await session.list_tools()
+            logger.info(f"Tools response from '{server_name}': {tools_response}")
+            
+            if tools_response and hasattr(tools_response, 'tools'):
+                tools_list = tools_response.tools
+            elif isinstance(tools_response, list):
+                tools_list = tools_response
             else:
-                logger.info(f"サーバー \"{server_name}\" からツール情報は提供されませんでした (空またはNone)。")
+                tools_list = []
+            
+            for tool in tools_list:
+                if hasattr(tool, 'name'):
+                    tool_id = f"{server_name}:{tool.name}"
+                    self.available_tools[tool_id] = tool
+                    description = getattr(tool, 'description', 'No description')
+                    logger.info(f"Found tool: {tool_id} - {description}")
+                elif isinstance(tool, dict) and 'name' in tool:
+                    tool_id = f"{server_name}:{tool['name']}"
+                    self.available_tools[tool_id] = tool
+                    description = tool.get('description', 'No description')
+                    logger.info(f"Found tool: {tool_id} - {description}")
 
-            resources_list: List[SDKResource] = await session.list_resources()
-            logger.info(f"Raw resources_response from server '{server_name}': {resources_list}")
-            if resources_list:
-                for res_obj in resources_list:
-                    if hasattr(res_obj, 'uri'):
-                        res_id = f"{server_name}:{res_obj.uri}"
-                        self.available_resources[res_id] = res_obj
-                        logger.info(f"リソース発見: {res_id} (Description: {getattr(res_obj, 'description', 'N/A')})")
-                    else:
-                        logger.warning(f"Received resource object without a 'uri' attribute: {res_obj}")
-            else:
-                logger.info(f"サーバー \"{server_name}\" からリソース情報は提供されませんでした (空またはNone)。")
+            # リソース一覧を取得
+            try:
+                resources_response = await session.list_resources()
+                logger.info(f"Resources response from '{server_name}': {resources_response}")
+                
+                if resources_response and hasattr(resources_response, 'resources'):
+                    resources_list = resources_response.resources
+                elif isinstance(resources_response, list):
+                    resources_list = resources_response
+                else:
+                    resources_list = []
+                
+                for resource in resources_list:
+                    if hasattr(resource, 'uri'):
+                        resource_id = f"{server_name}:{resource.uri}"
+                        self.available_resources[resource_id] = resource
+                        logger.info(f"Found resource: {resource_id}")
+                    elif isinstance(resource, dict) and 'uri' in resource:
+                        resource_id = f"{server_name}:{resource['uri']}"
+                        self.available_resources[resource_id] = resource
+                        logger.info(f"Found resource: {resource_id}")
+                        
+            except Exception as e:
+                logger.warning(f"Failed to list resources for '{server_name}': {e}")
 
         except Exception as e:
-            logger.error(f"サーバー \"{server_name}\" の機能発見中にエラー: {e}", exc_info=True)
+            logger.error(f"Error discovering capabilities for server '{server_name}': {e}", exc_info=True)
 
     async def execute_tool(self, tool_id: str, parameters: Dict[str, Any]) -> Dict[str, Any]:
         if tool_id not in self.available_tools:
-            logger.error(f"ツール \"{tool_id}\" が見つかりません。利用可能なツール: {list(self.available_tools.keys())}")
-            # 利用可能なツールの詳細もログに出す
-            for tid, t_obj in self.available_tools.items():
-                logger.debug(f"Available tool detail: ID={tid}, Name={getattr(t_obj, 'name', 'N/A')}")
-            raise ValueError(f"ツール \"{tool_id}\" が見つかりません。")
+            available = list(self.available_tools.keys())
+            logger.error(f"Tool '{tool_id}' not found. Available tools: {available}")
+            raise ValueError(f"Tool '{tool_id}' not found.")
 
         tool_obj = self.available_tools[tool_id]
-        server_name = tool_id.split(":", 1)[0] # tool_id からサーバー名を取得 (より堅牢な方法も検討可)
-        original_tool_name = getattr(tool_obj, 'name', None)
-
-        if not original_tool_name:
-             raise ValueError(f"ツールオブジェクト '{tool_id}' にname属性がありません。")
+        server_name = tool_id.split(":", 1)[0]
+        
+        # ツール名を取得
+        if hasattr(tool_obj, 'name'):
+            tool_name = tool_obj.name
+        elif isinstance(tool_obj, dict) and 'name' in tool_obj:
+            tool_name = tool_obj['name']
+        else:
+            raise ValueError(f"Cannot determine tool name for '{tool_id}'")
 
         session = self.sessions.get(server_name)
         if not session:
-            raise ConnectionError(f"サーバー \"{server_name}\" のセッションが接続されていません。")
+            raise ConnectionError(f"Server '{server_name}' is not connected.")
 
         try:
-            logger.info(f"ツール \"{original_tool_name}\" (ID: {tool_id}) をパラメータ {parameters} で実行します。")
-            result = await session.call_tool(tool_name=original_tool_name, arguments=parameters)
-            logger.info(f"ツール \"{tool_id}\" の実行結果 (RAW from SDK): {result}")
+            logger.info(f"Executing tool '{tool_name}' with parameters: {parameters}")
+            result = await session.call_tool(name=tool_name, arguments=parameters)
+            logger.info(f"Tool execution result: {result}")
             return self._process_tool_result(result)
         except Exception as e:
-            logger.error(f"ツール \"{tool_id}\" の実行エラー: {e}", exc_info=True)
-            raise RuntimeError(f"ツール \"{tool_id}\" の実行に失敗しました: {e}")
+            logger.error(f"Tool execution failed for '{tool_id}': {e}", exc_info=True)
+            raise RuntimeError(f"Tool execution failed: {e}")
 
     def _process_tool_result(self, result: Any) -> Dict[str, Any]:
-        # result は session.call_tool() の戻り値。SDKの型を想定。
-        # GitHub README "Writing MCP Clients" -> "Call a tool" の例では result の型は不明。
-        # mcp-integration-guide.md (JS SDK) では result.content や result.error を想定。
-        # FastMCPサーバーのツールが返す型 (例: ReadFileToolOutput) がどうラップされてくるか。
-        # ReadFileToolOutput は {"content": [{"type": "text", "text": "..."}]}
-
-        # 最も可能性が高いのは、result がこの辞書そのもの、あるいはそれに近い属性を持つオブジェクト。
-        if hasattr(result, 'content'): # ガイドのJS SDKに近いケース
-            content_data = result.content
-        elif isinstance(result, dict) and 'content' in result: # Python dictの場合
-            content_data = result['content']
-        elif hasattr(result, 'result') and isinstance(result.result, str): # プリミティブラッパーの可能性
-             return {"success": True, "data": result.result}
-        elif isinstance(result, str): # 単純な文字列が返ってきた場合
-             return {"success": True, "data": result}
-        else: # 不明な形式、またはエラー
-            if hasattr(result, 'error'):
-                error_msg = str(result.error)
-            elif isinstance(result, dict) and 'error' in result:
-                error_msg = str(result['error'])
+        """ツール実行結果を統一フォーマットに変換"""
+        try:
+            # エラーチェック
+            if hasattr(result, 'isError') and result.isError:
+                return {"success": False, "error": str(getattr(result, 'content', 'Unknown error'))}
+            
+            # content属性からデータを取得
+            content_data = None
+            if hasattr(result, 'content'):
+                content_data = result.content
+            elif isinstance(result, dict) and 'content' in result:
+                content_data = result['content']
+            elif isinstance(result, str):
+                return {"success": True, "data": result}
             else:
-                logger.warning(f"ツール結果の解釈に失敗。未知の形式またはエラー情報なし: {result}")
-                # エラーとして扱うのが安全か
-                return {"success": False, "error": f"未知のツール結果形式: {str(result)[:100]}"}
+                return {"success": True, "data": str(result)}
 
-            logger.error(f"ツール実行エラー (サーバーからのエラー): {error_msg}")
-            return {"success": False, "error": error_msg, "details": str(result)}
+            # content_dataの処理
+            if isinstance(content_data, list) and len(content_data) > 0:
+                # 最初の要素からテキストを抽出
+                first_item = content_data[0]
+                if isinstance(first_item, dict) and 'text' in first_item:
+                    processed_data = first_item['text']
+                elif hasattr(first_item, 'text'):
+                    processed_data = first_item.text
+                else:
+                    processed_data = str(first_item)
+            elif isinstance(content_data, dict) and 'text' in content_data:
+                processed_data = content_data['text']
+            elif hasattr(content_data, 'text'):
+                processed_data = content_data.text
+            else:
+                processed_data = str(content_data)
 
-        # content_data の処理 (mcp-integration-guide.md のクライアント側処理に準拠)
-        processed_content = content_data
-        if isinstance(content_data, list) and len(content_data) > 0 and \
-           isinstance(content_data[0], dict) and "text" in content_data[0]:
-            processed_content = content_data[0]["text"]
-        elif isinstance(content_data, dict) and "text" in content_data and content_data.get("type") == "text": # TextContentオブジェクトのような辞書の場合
-            processed_content = content_data["text"]
-        # TextContent_SDK オブジェクトの場合 (もしSDKがオブジェクトを直接返すなら)
-        # elif MCP_SDK_AVAILABLE and TextContent_SDK and isinstance(content_data, TextContent_SDK):
-        #    processed_content = content_data.text
+            return {
+                "success": True,
+                "data": processed_data,
+                "metadata": getattr(result, 'metadata', {}) if hasattr(result, 'metadata') else {}
+            }
 
-        return {
-            "success": True,
-            "data": processed_content,
-            "metadata": getattr(result, 'metadata', {}) if hasattr(result, 'metadata') else (result.get("metadata", {}) if isinstance(result, dict) else {})
-        }
+        except Exception as e:
+            logger.error(f"Error processing tool result: {e}")
+            return {"success": False, "error": f"Result processing error: {e}"}
 
     async def initialize_servers_from_config(self) -> None:
-        # (このメソッドは変更なし)
+        """設定からMCPサーバーを初期化"""
         if not self.config_manager:
-            logger.warning("ConfigManagerが設定されていません。MCPサーバーの初期化をスキップします。")
+            logger.warning("ConfigManager not available. Skipping MCP server initialization.")
             return
+            
         mcp_config = self.config_manager.get_mcp_settings()
         if not mcp_config or "servers" not in mcp_config:
-            logger.info("MCPサーバーの設定が見つかりません。")
+            logger.info("No MCP server configuration found.")
             return
+            
         for server_name, server_settings in mcp_config["servers"].items():
             if isinstance(server_settings, dict) and server_settings.get("enabled", True):
                 try:
                     await self.connect_to_server(server_name, server_settings)
                 except Exception as e:
-                    logger.error(f"サーバー \"{server_name}\" の初期化(connect_to_server呼び出し)中にエラー: {e}", exc_info=True)
+                    logger.error(f"Failed to initialize server '{server_name}': {e}", exc_info=True)
             else:
-                logger.info(f"サーバー \"{server_name}\" は無効化されているか、設定が不正です。スキップします。")
+                logger.info(f"Server '{server_name}' is disabled or has invalid configuration.")
 
     async def shutdown(self) -> None:
-        logger.info("全てのMCPクライアントセッションと関連プロセスをシャットダウンします...")
+        """全てのMCPセッションをシャットダウン"""
+        logger.info("Shutting down all MCP client sessions...")
+        
+        # セッションを閉じる
         for server_name, session in list(self.sessions.items()):
             try:
                 await session.close()
-                logger.info(f"サーバー \"{server_name}\" とのセッションを正常にクローズしました。")
+                logger.info(f"Session for server '{server_name}' closed successfully.")
             except Exception as e:
-                logger.error(f"サーバー \"{server_name}\" とのセッションクローズ中にエラー: {e}", exc_info=True)
-            # ClientSession.close() が transport/process の終了も管理することを期待
-            # そうでない場合は、active_stdio_contexts から対応する context を見つけて __aexit__ する必要がある
-            if server_name in self.active_stdio_contexts:
-                 logger.info(f"stdio_client context for {server_name} should be exited by session.close().")
-                 # await self.active_stdio_contexts[server_name].__aexit__(None, None, None)
-                 # del self.active_stdio_contexts[server_name] # __aexit__が呼ばれたら削除
-            del self.sessions[server_name]
-
-        # もし session.close() で context が終了しない場合に備えて残りの context も処理
-        for server_name, stdio_cm_instance in list(self.active_stdio_contexts.items()):
-            logger.warning(f"stdio_client context for {server_name} was not cleaned up by session.close(). Attempting explicit __aexit__.")
-            try:
-                await stdio_cm_instance.__aexit__(None, None, None)
-                logger.info(f"サーバー \"{server_name}\" のstdioプロセスコンテキストを正常に終了しました。")
-            except Exception as e:
-                logger.error(f"サーバー \"{server_name}\" のstdioプロセスコンテキスト終了中にエラー: {e}", exc_info=True)
+                logger.error(f"Error closing session for server '{server_name}': {e}", exc_info=True)
             finally:
-                del self.active_stdio_contexts[server_name]
+                del self.sessions[server_name]
+
+        # stdio contextsを閉じる
+        for server_name, stdio_context in list(self.stdio_contexts.items()):
+            try:
+                await stdio_context.__aexit__(None, None, None)
+                logger.info(f"Stdio context for server '{server_name}' closed successfully.")
+            except Exception as e:
+                logger.error(f"Error closing stdio context for server '{server_name}': {e}", exc_info=True)
+            finally:
+                del self.stdio_contexts[server_name]
 
         self.available_tools.clear()
         self.available_resources.clear()
-        logger.info("MCPクライアントのシャットダウンが完了しました。")
+        logger.info("MCP client shutdown completed.")
 
 # (main_test はコメントアウトのまま)
