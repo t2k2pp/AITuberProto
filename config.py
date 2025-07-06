@@ -150,7 +150,7 @@ class ConfigManager:
                         "description": "Echo test server (disabled by default)"
                     },
                     "playwright": {
-                        "enabled": false,
+                        "enabled": False,
                         "command": "npx",
                         "args": ["-y", "@modelcontextprotocol/server-playwright"],
                         "env": {"NODE_ENV": "production"},

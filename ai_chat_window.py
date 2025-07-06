@@ -655,8 +655,18 @@ class AIChatWindow:
             # 利用可能なMCPツールを取得
             available_tools = list(self.mcp_client_manager.available_tools.keys())
             if not available_tools:
-                self.log("利用可能なMCPツールがありません。MCPサーバーが起動していない可能性があります。")
-                analysis_result["error"] = "No MCP tools available"
+                # より詳細なエラー情報を提供
+                server_count = len(self.mcp_client_manager.sessions)
+                server_names = list(self.mcp_client_manager.sessions.keys())
+                
+                if server_count == 0:
+                    error_msg = "MCPサーバーが起動していません。MCP SDK のインストールまたは設定を確認してください。"
+                    self.log(f"利用可能なMCPツールがありません。{error_msg}")
+                    analysis_result["error"] = f"No MCP servers running. {error_msg}"
+                else:
+                    error_msg = f"MCPサーバー ({', '.join(server_names)}) は起動していますが、利用可能なツールがありません。"
+                    self.log(f"利用可能なMCPツールがありません。{error_msg}")
+                    analysis_result["error"] = f"No MCP tools available from servers: {', '.join(server_names)}"
                 return analysis_result
 
             # AIにメッセージ分析を依頼

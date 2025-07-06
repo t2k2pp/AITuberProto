@@ -1,0 +1,6 @@
+2025-07-07 07:18:02,468 - EchoMCPServerProcess - INFO - EchoMCPServer process script started.
+2025-07-07 07:18:02,468 - EchoMCPServerProcess - INFO - Successfully imported FastMCP from mcp.server.fastmcp.
+2025-07-07 07:18:02,471 - EchoMCPServerProcess - INFO - FastMCP instance 'EchoServerExample' created.
+2025-07-07 07:18:02,475 - EchoMCPServerProcess - INFO - Tool 'echo' defined for FastMCP instance.
+2025-07-07 07:18:02,475 - EchoMCPServerProcess - INFO - echo_server_mcp.py loaded. Attempting to run mcp_instance if it exists.
+2025-07-07 07:18:02,475 - EchoMCPServerProcess - INFO - Attempting to explicitly call mcp_instance.run() for 'EchoServerExample'
