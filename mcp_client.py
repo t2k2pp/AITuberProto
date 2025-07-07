@@ -247,11 +247,33 @@ class MCPClientManager:
             raise ConnectionError(f"Server '{server_name}' is not connected.")
 
         try:
-            logger.info(f"Executing tool '{tool_name}' with parameters: {parameters}")
+            # 詳細なMCP IN/OUTログを出力
+            logger.info(f"=== MCP TOOL EXECUTION START ===")
+            logger.info(f"Server: {server_name}")
+            logger.info(f"Tool: {tool_name}")
+            logger.info(f"Tool ID: {tool_id}")
+            logger.info(f"INPUT Parameters: {parameters}")
+            logger.info(f"=== MCP REQUEST SENT ===")
+            
             result = await session.call_tool(name=tool_name, arguments=parameters)
-            logger.info(f"Tool execution result: {result}")
-            return self._process_tool_result(result)
+            
+            logger.info(f"=== MCP RESPONSE RECEIVED ===")
+            logger.info(f"Raw Result Type: {type(result)}")
+            logger.info(f"Raw Result: {result}")
+            
+            processed_result = self._process_tool_result(result)
+            
+            logger.info(f"=== MCP PROCESSED RESULT ===")
+            logger.info(f"Processed Result: {processed_result}")
+            logger.info(f"=== MCP TOOL EXECUTION END ===")
+            
+            return processed_result
         except Exception as e:
+            logger.error(f"=== MCP TOOL EXECUTION FAILED ===")
+            logger.error(f"Server: {server_name}")
+            logger.error(f"Tool: {tool_name}")
+            logger.error(f"Error: {e}")
+            logger.error(f"=== MCP ERROR END ===")
             logger.error(f"Tool execution failed for '{tool_id}': {e}", exc_info=True)
             raise RuntimeError(f"Tool execution failed: {e}")
 
