@@ -693,23 +693,65 @@ class AITheaterWindow:
     def play_selected_line_audio_action(self):
         selected_items = self.script_tree.selection()
         if not selected_items:
-            messagebox.showwarning(self._("ai_theater.messagebox.warning.no_line_selected_play.title"), self._("ai_theater.messagebox.warning.no_line_selected_play.message"), parent=self.root); return
-        item_id = selected_items[0]; line_num = int(self.script_tree.item(item_id, 'values')[0])
+            messagebox.showwarning(self._("ai_theater.messagebox.warning.no_line_selected_play.title"), self._("ai_theater.messagebox.warning.no_line_selected_play.message"), parent=self.root)
+            return
+
+        item_id = selected_items[0]
+        try:
+            line_num = int(self.script_tree.item(item_id, 'values')[0])
+        except (IndexError, ValueError):
+            self.log("Could not get line number from selected item.")
+            return
+
+        line_data = next((item for item in self.script_data if item['line'] == line_num), None)
+        if not line_data:
+            self.log(f"Could not find data for line {line_num}.")
+            return
+
         audio_file = self.audio_output_folder / f"{line_num:06d}.wav" if self.audio_output_folder else None
-        if audio_file and audio_file.exists():
-            self.log(self._("ai_theater.log.audio_playback").format(audio_file=audio_file))
-            def play_async():
-                loop = asyncio.new_event_loop(); asyncio.set_event_loop(loop)
-                try: loop.run_until_complete(self.audio_player.play_audio_file(str(audio_file)))
-                except Exception as e: self.log(self._("ai_theater.log.audio_playback_error").format(error=e))
-                finally: loop.close()
-            threading.Thread(target=play_async, daemon=True).start()
-        else:
-            messagebox.showinfo(
-                self._("ai_theater.messagebox.info.audio_file_not_found_or_generated.title"),
-                self._("ai_theater.messagebox.info.audio_file_not_found_or_generated.message"),
-                parent=self.root
-            )
+        if not audio_file:
+            messagebox.showerror(self._("ai_theater.messagebox.error.audio_folder_not_set.title"), self._("ai_theater.messagebox.error.audio_folder_not_set.message"), parent=self.root)
+            return
+
+        def _generate_and_play_task():
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+            try:
+                # 音声ファイルが存在しない場合、生成を試みる
+                if not audio_file.exists():
+                    self.log(f"Audio file not found for line {line_num}. Attempting to generate.")
+                    self.root.after(0, self._update_line_status_in_tree, line_num, self._("ai_theater.status.generating"))
+                    
+                    synthesis_success = loop.run_until_complete(self._synthesize_script_line_logic(line_data))
+                    
+                    if not synthesis_success:
+                        self.root.after(0, self._update_line_status_in_tree, line_num, self._("ai_theater.status.failed"))
+                        self.root.after(0, messagebox.showerror,
+                                        self._("ai_theater.messagebox.error.audio_generation_failed.title"),
+                                        self._("ai_theater.messagebox.error.audio_generation_failed.message").format(line_num=line_num),
+                                        parent=self.root if self.root.winfo_exists() else None)
+                        return # 生成に失敗した場合はここで終了
+
+                    self.root.after(0, self._update_line_status_in_tree, line_num, self._("ai_theater.status.success"))
+
+                # 音声ファイルを再生する
+                if audio_file.exists():
+                    self.log(self._("ai_theater.log.audio_playback").format(audio_file=audio_file))
+                    self.root.after(0, self._update_line_status_in_tree, line_num, self._("ai_theater.status.playing"))
+                    loop.run_until_complete(self.audio_player.play_audio_file(str(audio_file)))
+                    self.root.after(0, self._update_line_status_in_tree, line_num, self._("ai_theater.status.played"))
+                else:
+                    # 生成後もファイルが見つからない場合
+                    self.log(f"Audio file {audio_file} still not found after attempting generation.")
+                    self.root.after(0, self._update_line_status_in_tree, line_num, self._("ai_theater.status.file_not_found"))
+
+            except Exception as e:
+                self.log(self._("ai_theater.log.audio_playback_error").format(error=e))
+            finally:
+                loop.close()
+
+        # 生成と再生のタスクをバックグラウンドスレッドで実行
+        threading.Thread(target=_generate_and_play_task, daemon=True).start()
 
     def play_script_sequentially_action(self):
         if not self.script_data:
