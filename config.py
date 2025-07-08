@@ -152,7 +152,7 @@ class ConfigManager:
                     "playwright": {
                         "enabled": False,
                         "command": "npx",
-                        "args": ["-y", "@modelcontextprotocol/server-playwright"],
+                        "args": ["-y", "@playwright/mcp"],
                         "env": {"NODE_ENV": "production"},
                         "description": "Playwright web automation server"
                     }
