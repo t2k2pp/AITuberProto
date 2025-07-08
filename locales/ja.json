@@ -296,9 +296,6 @@
         "ai_theater.log.csv_export_complete": "CSVエクスポート完了: {filepath}",
         "ai_theater.log.audio_all_deleted": "音声全削除完了。削除: {deleted_count}, 失敗: {failed_count}",
         "ai_theater.log.file_delete_error": "ファイル削除エラー {item}: {error}",
-        "ai_theater.log.kana_conversion_started": "AI劇場: カナ変換を開始します。モード: {mode}",
-        "ai_theater.log.kana_conversion_error": "AI劇場: カナ変換中にエラーが発生しました: {error}",
-        "ai_theater.log.kana_conversion_success": "AI劇場: カナ変換が成功しました。",
 
         "ai_theater.button.load_csv_script": "📜 CSV台本読み込み",
         "ai_theater.button.load_txt_script": "📜 TXT台本読み込み",
@@ -349,6 +346,9 @@
         "ai_theater.label.kana_conversion_mode": "変換モード:",
         "ai_theater.dropdown.hiragana": "ひらがな",
         "ai_theater.dropdown.katakana": "カタカナ",
+        "ai_theater.log.kana_conversion_started": "AI劇場: カナ変換を開始します。モード: {mode}",
+        "ai_theater.log.kana_conversion_error": "AI劇場: カナ変換中にエラーが発生しました: {error}",
+        "ai_theater.log.kana_conversion_success": "AI劇場: カナ変換が成功しました。",
 
         "ai_theater.filedialog.select_csv_script_title": "CSV台本ファイルを選択",
         "ai_theater.filedialog.csv_files": "CSVファイル",
