@@ -1,8 +1,0 @@
-2025-07-07 12:46:20,028 - FileSystemMCPServerProcess - INFO - FileSystemMCPServer process started (FastMCP implementation).
-2025-07-07 12:46:20,028 - FileSystemMCPServerProcess - INFO - Current working directory: C:\Users\osia3\Downloads\gemini\aituber_system
-2025-07-07 12:46:20,028 - FileSystemMCPServerProcess - INFO - Python executable: C:\Users\osia3\AppData\Local\Programs\Python\Python313\python.EXE
-2025-07-07 12:46:20,562 - FileSystemMCPServerProcess - INFO - Successfully imported MCP SDK server classes (FastMCP, TextContent).
-2025-07-07 12:46:20,570 - FileSystemMCPServerProcess - INFO - FastMCP instance created: Name='filesystem-server'
-2025-07-07 12:46:20,570 - FileSystemMCPServerProcess - INFO - FileSystemMCPServer base directory set to: C:\Users\osia3\Downloads\gemini\aituber_system
-2025-07-07 12:46:20,572 - FileSystemMCPServerProcess - INFO - Starting FileSystemMCPServer (FastMCP) 'filesystem-server'...
-2025-07-07 23:20:07,247 - FileSystemMCPServerProcess - INFO - FileSystemMCPServer (FastMCP) stopped.

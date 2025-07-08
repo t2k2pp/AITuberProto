@@ -1,8 +1,0 @@
-2025-07-07 07:43:34,085 - VerboseServer - INFO - VerboseServer: Starting verbose MCP test server
-2025-07-07 07:43:34,085 - VerboseServer - INFO - VerboseServer: Python executable: C:\Users\osia3\AppData\Local\Programs\Python\Python313\python.exe
-2025-07-07 07:43:34,085 - VerboseServer - INFO - VerboseServer: Working directory: C:\Users\osia3\Downloads\gemini\aituber_system
-2025-07-07 07:43:34,086 - VerboseServer - INFO - VerboseServer: Log file: C:\Users\osia3\Downloads\gemini\aituber_system\logs\verbose_server.log
-2025-07-07 07:43:34,086 - VerboseServer - INFO - VerboseServer: Starting stdin handler
-2025-07-07 07:43:34,087 - VerboseServer - DEBUG - VerboseServer: Waiting for input...
-2025-07-07 07:45:51,655 - VerboseServer - INFO - VerboseServer: Shutting down via KeyboardInterrupt
-2025-07-07 07:45:51,655 - VerboseServer - INFO - VerboseServer: Shutdown complete
