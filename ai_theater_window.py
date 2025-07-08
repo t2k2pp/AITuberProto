@@ -29,7 +29,7 @@ class AITheaterWindow:
         i18n_setup.init_i18n()
         self._ = i18n_setup.get_translator()
         self.root.title(self._("ai_theater.title"))
-        self.root.geometry("1050x850")
+        self.root.geometry("1500x850")
 
         self.loading_label = customtkinter.CTkLabel(self.root, text=self._("ai_theater.loading"), font=("Yu Gothic UI", 18))
         self.loading_label.pack(expand=True, fill="both")

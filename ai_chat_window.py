@@ -612,10 +612,16 @@ class AIChatWindow:
         if not ai_char_data: self.log(self._("ai_chat.log.ai_char_data_not_found", char_name=ai_char_name)); return
 
         try:
-            api_key = self.config.get_system_setting("google_ai_api_key")
-            if not api_key:
-                self.root.after(0, self._add_message_to_chat_display_tree, f"🤖 {ai_char_name}", self._("ai_chat.message.google_api_key_not_set"))
-                return
+            text_gen_model = self.config.get_system_setting("text_generation_model", "gemini-1.5-flash")
+            
+            # LM Studio使用時はGoogle APIキーは不要
+            if text_gen_model != "local_lm_studio":
+                api_key = self.config.get_system_setting("google_ai_api_key")
+                if not api_key:
+                    self.root.after(0, self._add_message_to_chat_display_tree, f"🤖 {ai_char_name}", self._("ai_chat.message.google_api_key_not_set"))
+                    return
+            else:
+                api_key = None  # LM Studio使用時はAPIキー不要
 
             # MCP機能統合：ユーザーメッセージの分析とツール実行
             mcp_analysis_result = {"needs_tools": False, "tool_results": [], "tools_used": [], "analysis_text": ""}
@@ -635,7 +641,6 @@ class AIChatWindow:
                 self.log(f"MCP analysis failed: {mcp_error}")
                 # MCPエラーが発生しても通常のAI応答は継続
 
-            client = genai.Client(api_key=api_key)
             ai_prompt = self.character_manager.get_character_prompt(ai_char_id)
             chat_history_for_prompt = []
             if self.current_ai_chat_file_path and self.current_ai_chat_file_path.exists():
@@ -656,7 +661,6 @@ class AIChatWindow:
                 user_char_name_for_history, user_input_text, ai_char_name, mcp_analysis_result
             )
             
-            text_gen_model = self.config.get_system_setting("text_generation_model", "gemini-1.5-flash")
             ai_response_text = self._("ai_chat.message.error_getting_response") # デフォルトのエラーメッセージ
 
             # ログ記録: AIへのリクエスト
@@ -673,6 +677,7 @@ class AIChatWindow:
                     finally:
                         loop.close()
             else:
+                client = genai.Client(api_key=api_key)
                 gemini_response = client.models.generate_content(model=text_gen_model, contents=full_prompt,
                                                                generation_config=genai_types.GenerateContentConfig(temperature=0.8, max_output_tokens=400))
                 ai_response_text = gemini_response.text.strip() if gemini_response.text else self._("ai_chat.message.ai_generic_error_response")
@@ -753,11 +758,22 @@ class AIChatWindow:
                 return analysis_result
 
             # AIにメッセージ分析を依頼
-            api_key = self.config.get_system_setting("google_ai_api_key")
-            if not api_key:
-                return analysis_result
-
-            client = genai.Client(api_key=api_key)
+            text_gen_model = self.config.get_system_setting("text_generation_model", "gemini-1.5-flash")
+            
+            if text_gen_model == "local_lm_studio":
+                # LM Studio使用時はローカルLLMで分析
+                local_llm_url = self.config.get_system_setting("local_llm_endpoint_url")
+                if not local_llm_url:
+                    self.log("LM Studio URLが設定されていないため、MCP分析をスキップします")
+                    return analysis_result
+                client = None  # ローカルLLM使用時はclientは不要
+            else:
+                # Google AI使用時
+                api_key = self.config.get_system_setting("google_ai_api_key")
+                if not api_key:
+                    return analysis_result
+                client = genai.Client(api_key=api_key)
+                local_llm_url = None
             
             # ツール説明を生成
             tool_descriptions = []
@@ -822,20 +838,27 @@ class AIChatWindow:
 - 「読んで」「内容」「確認」「チェック」などのキーワード → ツール使用
 - 一般的な質問や挨拶 → tools: false"""
 
-            analysis_response = client.models.generate_content(
-                model="gemini-1.5-flash",
-                contents=analysis_prompt,
-                generation_config=genai_types.GenerateContentConfig(temperature=0.3, max_output_tokens=300)
-            )
+            # AIモデルに応じて分析リクエストを実行
+            if text_gen_model == "local_lm_studio":
+                # LM Studio使用時
+                analysis_response_text = await self._generate_response_local_llm_chat(analysis_prompt, local_llm_url, "MCP Analysis")
+            else:
+                # Google AI使用時
+                analysis_response = client.models.generate_content(
+                    model="gemini-1.5-flash",
+                    contents=analysis_prompt,
+                    generation_config=genai_types.GenerateContentConfig(temperature=0.3, max_output_tokens=300)
+                )
+                analysis_response_text = analysis_response.text if analysis_response.text else ""
 
-            if not analysis_response.text:
+            if not analysis_response_text:
                 return analysis_result
 
             # JSONレスポンスをパース
             try:
                 import re
                 # JSONブロックを抽出
-                json_match = re.search(r'\{.*\}', analysis_response.text, re.DOTALL)
+                json_match = re.search(r'\{.*\}', analysis_response_text, re.DOTALL)
                 if json_match:
                     analysis_data = json.loads(json_match.group())
                     
