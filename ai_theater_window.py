@@ -11,6 +11,7 @@ import time
 import wave
 import shutil
 import chardet # 文字コード判別ライブラリ
+from pykakasi import kakasi
 
 from config import ConfigManager
 from character_manager import CharacterManager
@@ -96,6 +97,23 @@ class AITheaterWindow:
         self.loaded_csv_label = customtkinter.CTkLabel(top_frame, text=self._("ai_theater.label.loaded_csv_file"), font=self.default_font)
         self.loaded_csv_label.pack(side="left", padx=10)
 
+        # Kana conversion options
+        load_options_frame = customtkinter.CTkFrame(main_frame, fg_color="transparent")
+        load_options_frame.pack(fill="x", padx=5, pady=5)
+
+        customtkinter.CTkLabel(load_options_frame, text=self._("ai_theater.label.load_options"), font=self.label_font).pack(side="left", padx=(5,10))
+
+        self.convert_kana_var = tk.BooleanVar(value=False)
+        self.convert_kana_checkbox = customtkinter.CTkCheckBox(load_options_frame, text=self._("ai_theater.checkbox.convert_kana"), variable=self.convert_kana_var, font=self.default_font, command=self.on_convert_kana_toggled)
+        self.convert_kana_checkbox.pack(side="left", padx=5)
+
+        self.kana_mode_label = customtkinter.CTkLabel(load_options_frame, text=self._("ai_theater.label.kana_conversion_mode"), font=self.default_font)
+        self.kana_mode_label.pack(side="left", padx=5)
+
+        self.kana_mode_var = tk.StringVar(value=self._("ai_theater.dropdown.hiragana"))
+        self.kana_mode_combo = customtkinter.CTkComboBox(load_options_frame, variable=self.kana_mode_var, values=[self._("ai_theater.dropdown.hiragana"), self._("ai_theater.dropdown.katakana")], state="readonly", width=120, font=self.default_font)
+        self.kana_mode_combo.pack(side="left", padx=5)
+
         script_display_outer_frame = customtkinter.CTkFrame(main_frame)
         script_display_outer_frame.pack(fill="both", expand=True, padx=5, pady=5)
         customtkinter.CTkLabel(script_display_outer_frame, text=self._("ai_theater.label.script_preview"), font=self.label_font).pack(anchor="w", padx=10, pady=(5,0))
@@ -174,6 +192,7 @@ class AITheaterWindow:
         customtkinter.CTkButton(file_ops_frame, text=self._("ai_theater.button.delete_all_audio"), command=self.delete_all_audio_files_action, font=self.default_font).pack(side="right", padx=2)
 
         self.on_script_action_selected_ui_update()
+        self.on_convert_kana_toggled()
 
     def populate_talker_dropdown(self):
         all_chars = self.character_manager.get_all_characters()
@@ -201,6 +220,11 @@ class AITheaterWindow:
             self.script_talker_combo.configure(state="readonly")
             if not self.script_talker_var.get() and self.script_talker_combo.cget("values"): # cgetで取得
                 self.script_talker_var.set(self.script_talker_combo.cget("values")[0])
+
+    def on_convert_kana_toggled(self):
+        is_enabled = self.convert_kana_var.get()
+        self.kana_mode_label.configure(state="normal" if is_enabled else "disabled")
+        self.kana_mode_combo.configure(state="readonly" if is_enabled else "disabled")
 
     def load_csv_script_action(self, filepath_to_load=None):
         if filepath_to_load is None:
@@ -272,6 +296,11 @@ class AITheaterWindow:
                 self.log(self._("ai_theater.log.csv_read_encoding_not_found").format(filepath=self.current_script_path))
                 self.current_script_path = None; self.audio_output_folder = None; return
             # --- 文字コード自動判別処理ここまで ---
+
+            # --- カナ変換処理 ---
+            if self.convert_kana_var.get():
+                read_data = self._convert_script_data_to_kana(read_data)
+            # --- カナ変換処理ここまで ---
 
             status_not_generated = self._("ai_theater.status.not_generated")
             status_success = self._("ai_theater.status.success")
@@ -364,6 +393,11 @@ class AITheaterWindow:
                 self.loaded_csv_label.configure(text=self._("ai_theater.label.file_not_loaded"))
                 return
             # --- 文字コード自動判別処理ここまで ---
+
+            # --- カナ変換処理 ---
+            if self.convert_kana_var.get():
+                lines = self._convert_lines_to_kana(lines)
+            # --- カナ変換処理ここまで ---
 
             line_num = 1
             active_character_name = self._("ai_theater.dropdown.narrator") # デフォルト話者
@@ -947,6 +981,53 @@ class AITheaterWindow:
         for item_id in self.script_tree.get_children(): # Update UI
             line_num = int(self.script_tree.item(item_id, 'values')[0])
             self._update_line_status_in_tree(line_num, status_not_generated) # status is already translated
+
+    def _convert_script_data_to_kana(self, script_data):
+        """CSVデータ内の'words'をカナに変換する。"""
+        mode = self.kana_mode_var.get()
+        self.log(self._("ai_theater.log.kana_conversion_started").format(mode=mode))
+        try:
+            kks = kakasi()
+            target_key = "hira" if mode == self._("ai_theater.dropdown.hiragana") else "kana"
+            
+            converted_data = []
+            for row in script_data:
+                # talkまたはnarrationアクションで、wordsに内容がある場合のみ変換
+                if row.get('action') in ['talk', 'narration'] and row.get('words'):
+                    result = kks.convert(row['words'])
+                    converted_text = "".join([item[target_key] for item in result])
+                    row['words'] = converted_text
+                converted_data.append(row)
+            self.log(self._("ai_theater.log.kana_conversion_success"))
+            return converted_data
+        except Exception as e:
+            self.log(self._("ai_theater.log.kana_conversion_error").format(error=e))
+            messagebox.showerror("Error", f"Kana conversion failed: {e}", parent=self.root)
+            return script_data # Return original data on error
+
+    def _convert_lines_to_kana(self, lines):
+        """テキスト行のリストをカナに変換する。"""
+        mode = self.kana_mode_var.get()
+        self.log(self._("ai_theater.log.kana_conversion_started").format(mode=mode))
+        try:
+            kks = kakasi()
+            target_key = "hira" if mode == self._("ai_theater.dropdown.hiragana") else "kana"
+
+            converted_lines = []
+            for line in lines:
+                line_stripped = line.strip()
+                if line_stripped:
+                    result = kks.convert(line_stripped)
+                    converted_text = "".join([item[target_key] for item in result])
+                    converted_lines.append(converted_text + '\n') # Add newline back
+                else:
+                    converted_lines.append(line) # Keep empty/whitespace-only lines
+            self.log(self._("ai_theater.log.kana_conversion_success"))
+            return converted_lines
+        except Exception as e:
+            self.log(self._("ai_theater.log.kana_conversion_error").format(error=e))
+            messagebox.showerror("Error", f"Kana conversion failed: {e}", parent=self.root)
+            return lines # Return original data on error
 
 def main():
     # i18n_setup.init_i18n() # Moved to class init
