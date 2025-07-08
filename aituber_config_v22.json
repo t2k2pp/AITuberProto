@@ -1,0 +1,125 @@
+{
+  "system_settings": {
+    "google_ai_api_key": "",
+    "youtube_api_key": "",
+    "voice_engine": "google_ai_studio_new",
+    "auto_save": true,
+    "debug_mode": false,
+    "audio_device": "default",
+    "cost_mode": "free",
+    "conversation_history_length": 0,
+    "text_generation_model": "gemini-1.5-flash-latest",
+    "ai_chat_processing_mode": "sequential",
+    "local_llm_endpoint_url": ""
+  },
+  "characters": {
+    "875ef913-4d69-41cd-84a4-3b4189247a35": {
+      "name": "system_tts_Microsoft Ayumi OneCore",
+      "personality": {
+        "base_tone": "",
+        "speech_style": "",
+        "character_traits": [],
+        "favorite_topics": []
+      },
+      "response_settings": {
+        "max_length": "1-2文程度",
+        "use_emojis": true,
+        "emotion_level": "普通"
+      },
+      "voice_settings": {
+        "engine": "system_tts",
+        "model": "Microsoft Ayumi OneCore",
+        "speed": 1.0,
+        "volume": 1.0,
+        "quality": "標準"
+      },
+      "created_at": "2025-07-08T20:59:38.946033",
+      "char_id": "875ef913-4d69-41cd-84a4-3b4189247a35",
+      "version": "2.2"
+    },
+    "1a798661-0122-416c-a575-e6bcca5565b5": {
+      "name": "ナレーター",
+      "personality": {
+        "base_tone": "",
+        "speech_style": "",
+        "character_traits": [],
+        "favorite_topics": []
+      },
+      "voice_settings": {
+        "engine": "system_tts",
+        "model": "Microsoft Haruka Desktop",
+        "speed": 1.0,
+        "quality": "標準",
+        "volume": 1.0
+      },
+      "response_settings": {
+        "max_length": "1-2文程度",
+        "use_emojis": true,
+        "emotion_level": "普通"
+      },
+      "char_id": "1a798661-0122-416c-a575-e6bcca5565b5",
+      "created_at": "2025-07-08T20:59:45.402693",
+      "updated_at": "2025-07-08T21:01:53.166050"
+    }
+  },
+  "streaming_settings": {
+    "current_character": "",
+    "live_id": "",
+    "chat_monitor_interval": 5,
+    "response_delay": 1.0,
+    "auto_response": true
+  },
+  "ui_settings": {
+    "window_size": "1000x900",
+    "theme": "default",
+    "log_level": "INFO",
+    "language": "ja"
+  },
+  "voice_engine_priority": [
+    "google_ai_studio_new",
+    "avis_speech",
+    "voicevox",
+    "system_tts"
+  ],
+  "mcp_settings": {
+    "servers": {
+      "filesystem": {
+        "enabled": true,
+        "command": "python",
+        "args": [
+          "./mcp_servers/file_system_server.py"
+        ],
+        "env": {
+          "PYTHONUNBUFFERED": "1"
+        },
+        "description": "File system operations server"
+      },
+      "echo": {
+        "enabled": false,
+        "command": "python",
+        "args": [
+          "./mcp_servers/echo_server_mcp.py"
+        ],
+        "env": {
+          "PYTHONUNBUFFERED": "1"
+        },
+        "description": "Echo test server (disabled by default)"
+      },
+      "playwright": {
+        "enabled": false,
+        "command": "npx",
+        "args": [
+          "-y",
+          "@modelcontextprotocol/server-playwright"
+        ],
+        "env": {
+          "NODE_ENV": "production"
+        },
+        "description": "Playwright web automation server"
+      }
+    },
+    "client_options": {
+      "default_timeout": 30
+    }
+  }
+}
