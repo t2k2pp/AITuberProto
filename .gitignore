@@ -1,3 +1,8 @@
 __pycache__/
 communication_logs/
 ai_chat_history/
+logs/
+*_audio/
+*.json
+*.db
+.env

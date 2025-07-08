@@ -646,9 +646,21 @@ class AITheaterWindow:
         status_generating = self._("ai_theater.status.generating")
         status_success = self._("ai_theater.status.success")
         status_failed = self._("ai_theater.status.failed")
+        status_skipped = self._("ai_theater.status.success") # 既存の成功ステータスを流用
         try:
             for i, line_data in enumerate(self.script_data):
                 if self.stop_requested: break
+
+                line_num = line_data['line']
+                audio_file_path = self.audio_output_folder / f"{line_num:06d}.wav"
+
+                if audio_file_path.exists():
+                    self.log(f"Line {line_num}: Audio file already exists, skipping generation.")
+                    self.root.after(0, self._update_line_status_in_tree, line_num, status_skipped)
+                    success_count += 1
+                    progress_var.set(i + 1); progress_root.update_idletasks()
+                    continue
+
                 self.root.after(0, self._update_line_status_in_tree, line_data['line'], status_generating)
                 success = loop.run_until_complete(self._synthesize_script_line_logic(line_data))
                 final_status = status_success if success else status_failed
