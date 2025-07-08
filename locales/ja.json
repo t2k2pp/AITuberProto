@@ -878,7 +878,7 @@
         "ai_chat.log.mcp_shutdown_error": "MCPクライアントのシャットダウン中にエラーが発生しました: {error}",
         "ai_chat.mcp.error.invalid_command_format": "MCPコマンドの形式が不正です。例: /mcp <tool_id> {\"param\": \"value\"}",
         "ai_chat.mcp.error.invalid_json_params": "MCPコマンドのパラメータJSONが無効です: {error}",
-        "ai_chat.log.mcp_tool_execution_start": "Starting execution of MCP tool '{tool_id}'. Parameters: {params}",
+        "ai_chat.log.mcp_tool_execution_start": "MCPツール '{tool_id}' の実行を開始します。パラメータ: {params}",
         "ai_chat.mcp.success.tool_executed": "MCPツール '{tool_id}' が正常に実行されました。\n結果:\n{result}",
         "ai_chat.log.mcp_tool_execution_success": "MCPツール '{tool_id}' の実行に成功しました。結果: {result}",
         "ai_chat.mcp.error.tool_execution_failed": "MCPツール '{tool_id}' の実行に失敗しました。\nエラー: {error}",
