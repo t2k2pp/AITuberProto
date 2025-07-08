@@ -242,7 +242,7 @@ class AITheaterWindow:
             else:
                 encodings_to_attempt = [encoding_to_try, 'utf-8', 'shift_jis', 'euc_jp']
 
-            reader = None
+            read_data = None
             used_encoding = None
             for enc in list(dict.fromkeys(enc for enc in encodings_to_attempt if enc)): # Noneを除外
                 try:
@@ -250,8 +250,8 @@ class AITheaterWindow:
                         reader = csv.DictReader(csvfile)
                         if reader.fieldnames != ['action', 'talker', 'words']:
                             self.log(self._("ai_theater.log.csv_read_attempt_encoding_header_invalid").format(encoding=enc))
-                            reader = None
                             continue
+                        read_data = list(reader) # Read data inside the 'with' block
                     used_encoding = enc
                     self.log(self._("ai_theater.log.csv_read_success_encoding").format(encoding=enc))
                     break
@@ -260,10 +260,10 @@ class AITheaterWindow:
                     continue
                 except Exception as e_csv_read:
                     self.log(self._("ai_theater.log.csv_read_error_encoding").format(encoding=enc, error=e_csv_read))
-                    reader = None
+                    read_data = None
                     continue
 
-            if reader is None:
+            if read_data is None:
                 messagebox.showerror(
                     self._("ai_theater.messagebox.error.csv_read_failed.title"),
                     self._("ai_theater.messagebox.error.csv_read_failed.message_format_or_encoding"),
@@ -276,7 +276,7 @@ class AITheaterWindow:
             status_not_generated = self._("ai_theater.status.not_generated")
             status_success = self._("ai_theater.status.success")
 
-            for i, row in enumerate(reader):
+            for i, row in enumerate(read_data):
                 line_num = i + 1; status = status_not_generated
                 audio_file_for_line = self.audio_output_folder / f"{line_num:06d}.wav"
                 if audio_file_for_line.exists(): status = status_success
