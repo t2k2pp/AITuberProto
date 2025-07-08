@@ -90,6 +90,7 @@ class LauncherWindow:
 
         sub_features_config = [
             {"text_key": "launcher.button.settings", "module_name": "settings_window.py", "title_key": "launcher.window_title.settings"},
+            {"text_key": "launcher.button.mcp_management", "module_name": "mcp_management_window.py", "title_key": "launcher.window_title.mcp_management"},
             {"text_key": "launcher.button.debug", "module_name": "debug_window.py", "title_key": "launcher.window_title.debug"},
             {"text_key": "launcher.button.help", "module_name": "help_window.py", "title_key": "launcher.window_title.help"},
             {"text_key": "launcher.button.communication_log", "module_name": "communication_log_window.py", "title_key": "launcher.window_title.communication_log"} # 新しいボタン情報を追加

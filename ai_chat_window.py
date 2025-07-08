@@ -100,6 +100,10 @@ class AIChatWindow:
         # 呼び出しタイミングに特に注意は不要。
         # ただし、渡される message が翻訳済みであることを期待する
         logger.info(message)
+        
+        # MCPログをUIにも表示（デバッグ用）
+        if "MCP" in message or "filesystem" in message:
+            self._add_message_to_chat_display_tree("🔧 System", message)
 
     def on_closing(self):
         self.log(self._("ai_chat.log.shutting_down_mcp"))
@@ -654,9 +658,25 @@ class AIChatWindow:
 
             # 利用可能なMCPツールを取得
             available_tools = list(self.mcp_client_manager.available_tools.keys())
+            
+            # MCP分析開始ログ
+            self.log(f"=== MCP ANALYSIS START ===")
+            self.log(f"Available MCP Tools: {available_tools}")
+            self.log(f"Active MCP Sessions: {list(self.mcp_client_manager.sessions.keys())}")
+            
             if not available_tools:
-                self.log("利用可能なMCPツールがありません。MCPサーバーが起動していない可能性があります。")
-                analysis_result["error"] = "No MCP tools available"
+                # より詳細なエラー情報を提供
+                server_count = len(self.mcp_client_manager.sessions)
+                server_names = list(self.mcp_client_manager.sessions.keys())
+                
+                if server_count == 0:
+                    error_msg = "MCPサーバーが起動していません。MCP SDK のインストールまたは設定を確認してください。"
+                    self.log(f"利用可能なMCPツールがありません。{error_msg}")
+                    analysis_result["error"] = f"No MCP servers running. {error_msg}"
+                else:
+                    error_msg = f"MCPサーバー ({', '.join(server_names)}) は起動していますが、利用可能なツールがありません。"
+                    self.log(f"利用可能なMCPツールがありません。{error_msg}")
+                    analysis_result["error"] = f"No MCP tools available from servers: {', '.join(server_names)}"
                 return analysis_result
 
             # AIにメッセージ分析を依頼
@@ -690,30 +710,44 @@ class AIChatWindow:
                         desc = 'ツールの説明なし'
                 tool_descriptions.append(f"- {tool_id}: {desc}")
             
-            analysis_prompt = f"""以下のユーザーメッセージを分析して、外部ツールを使用する必要があるかどうかを判断してください。
+            analysis_prompt = f"""あなたはファイルアクセス機能を持つAIアシスタントです。ユーザーの質問に答えるために、必要に応じて利用可能なツールを使用してください。
+
+【重要】ユーザーが以下のような質問をした場合、必ずツールを使用してください：
+- 「○○ファイルの内容を教えて」「○○を読んで」
+- 「○○ファイルにはどんなことが書いてある？」
+- 「設定ファイルを確認して」「ログファイルをチェックして」
+- 「プロジェクトの構成を教えて」「コードを見せて」
 
 利用可能なツール:
 {chr(10).join(tool_descriptions)}
 
 ユーザーメッセージ: "{user_message}"
 
-以下のJSON形式で回答してください:
+【具体例】
+- ユーザー: "config.pyの内容を教えて" 
+  → needs_tools: true, tool_id: "filesystem:read_file", parameters: {{"path": "config.py"}}
+- ユーザー: "main.pyファイルを読んで"
+  → needs_tools: true, tool_id: "filesystem:read_file", parameters: {{"path": "main.py"}}
+- ユーザー: "requirements.txtには何が書いてある？"
+  → needs_tools: true, tool_id: "filesystem:read_file", parameters: {{"path": "requirements.txt"}}
+
+以下のJSON形式で必ず回答してください:
 {{
     "needs_tools": true/false,
     "recommended_tools": [
         {{
-            "tool_id": "ツールID",
-            "purpose": "使用目的",
-            "parameters": {{"param1": "value1"}}
+            "tool_id": "filesystem:read_file",
+            "purpose": "ファイル内容の読み取り",
+            "parameters": {{"path": "ファイルパス"}}
         }}
     ],
-    "reasoning": "判断理由"
+    "reasoning": "ツールを使用する理由"
 }}
 
 判断基準:
-- ファイルの読み取り、データの検索が必要な場合 → filesystem ツール
-- Webページの情報取得、スクリーンショット、Web操作が必要な場合 → playwright ツール
-- 一般的な質問や会話の場合 → tools: false"""
+- ファイル名が言及されている → 必ずfilesystem:read_fileツールを使用
+- 「読んで」「内容」「確認」「チェック」などのキーワード → ツール使用
+- 一般的な質問や挨拶 → tools: false"""
 
             analysis_response = client.models.generate_content(
                 model="gemini-1.5-flash",
@@ -746,7 +780,11 @@ class AIChatWindow:
                             
                             if tool_id in available_tools:
                                 try:
-                                    self.log(f"MCPツール '{tool_id}' を実行中: {purpose}")
+                                    self.log(f"=== MCP TOOL EXECUTION FROM AI CHAT ===")
+                                    self.log(f"Tool ID: {tool_id}")
+                                    self.log(f"Purpose: {purpose}")
+                                    self.log(f"Parameters: {parameters}")
+                                    self.log(f"=== CALLING MCP CLIENT MANAGER ===")
                                     
                                     # ツール実行にタイムアウトを設定
                                     tool_result = await asyncio.wait_for(
@@ -754,10 +792,14 @@ class AIChatWindow:
                                         timeout=30  # 30秒タイムアウト
                                     )
                                     
+                                    self.log(f"=== MCP TOOL RESULT RECEIVED ===")
+                                    self.log(f"Tool Result: {tool_result}")
+                                    
                                     if tool_result.get("success", False):
-                                        self.log(f"MCPツール '{tool_id}' 実行成功")
+                                        self.log(f"✅ MCPツール '{tool_id}' 実行成功")
+                                        self.log(f"Result Content: {tool_result.get('content', 'No content')}")
                                     else:
-                                        self.log(f"MCPツール '{tool_id}' 実行失敗: {tool_result.get('error', 'Unknown error')}")
+                                        self.log(f"❌ MCPツール '{tool_id}' 実行失敗: {tool_result.get('error', 'Unknown error')}")
                                     
                                     analysis_result["tool_results"].append({
                                         "tool_id": tool_id,

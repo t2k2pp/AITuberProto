@@ -66,7 +66,8 @@ except ImportError as e:
 class MCPClientManager:
     def __init__(self, config_manager: Optional[Any] = None):
         self.sessions: Dict[str, Any] = {}
-        self.stdio_contexts: Dict[str, Any] = {}
+        self.stdio_contexts: Dict[str, Any] = {}  # 旧形式、互換性のため保持
+        self.exit_stacks: Dict[str, Any] = {}  # AsyncExitStack の管理（公式パターン）
         self.available_tools: Dict[str, Any] = {}
         self.available_resources: Dict[str, Any] = {}
         self.config_manager = config_manager
@@ -100,6 +101,9 @@ class MCPClientManager:
             logger.info(f"MCPサーバー '{server_name}' は既に接続済みです。")
             return
 
+        # 公式パターンに従って AsyncExitStack を使用
+        from contextlib import AsyncExitStack
+        
         try:
             command = server_config.get("command", "python")
             raw_args = server_config.get("args", [])
@@ -131,16 +135,20 @@ class MCPClientManager:
                 env=effective_env
             )
 
-            # stdio_clientでサーバーに接続
-            stdio_context = stdio_client(server_params)
-            self.stdio_contexts[server_name] = stdio_context
+            # 公式パターン: AsyncExitStack でリソース管理
+            exit_stack = AsyncExitStack()
+            self.exit_stacks[server_name] = exit_stack
             
-            read_stream, write_stream = await stdio_context.__aenter__()
+            # stdio_client を AsyncExitStack で管理
+            stdio_transport = await exit_stack.enter_async_context(stdio_client(server_params))
+            read_stream, write_stream = stdio_transport
             
-            # ClientSessionを作成
-            session = ClientSession(read_stream, write_stream)
+            # ClientSession を AsyncExitStack で管理
+            session = await exit_stack.enter_async_context(
+                ClientSession(read_stream, write_stream)
+            )
             
-            # セッション初期化
+            # セッション初期化（公式パターン通り）
             logger.info(f"Initializing session for '{server_name}'...")
             await session.initialize()
             
@@ -152,13 +160,13 @@ class MCPClientManager:
 
         except Exception as e:
             logger.error(f"MCPサーバー '{server_name}' への接続に失敗: {e}", exc_info=True)
-            # クリーンアップ
-            if server_name in self.stdio_contexts:
+            # AsyncExitStack のクリーンアップ
+            if server_name in self.exit_stacks:
                 try:
-                    await self.stdio_contexts[server_name].__aexit__(type(e), e, e.__traceback__)
+                    await self.exit_stacks[server_name].aclose()
                 except Exception:
                     pass
-                del self.stdio_contexts[server_name]
+                del self.exit_stacks[server_name]
             raise
 
 
@@ -239,11 +247,33 @@ class MCPClientManager:
             raise ConnectionError(f"Server '{server_name}' is not connected.")
 
         try:
-            logger.info(f"Executing tool '{tool_name}' with parameters: {parameters}")
+            # 詳細なMCP IN/OUTログを出力
+            logger.info(f"=== MCP TOOL EXECUTION START ===")
+            logger.info(f"Server: {server_name}")
+            logger.info(f"Tool: {tool_name}")
+            logger.info(f"Tool ID: {tool_id}")
+            logger.info(f"INPUT Parameters: {parameters}")
+            logger.info(f"=== MCP REQUEST SENT ===")
+            
             result = await session.call_tool(name=tool_name, arguments=parameters)
-            logger.info(f"Tool execution result: {result}")
-            return self._process_tool_result(result)
+            
+            logger.info(f"=== MCP RESPONSE RECEIVED ===")
+            logger.info(f"Raw Result Type: {type(result)}")
+            logger.info(f"Raw Result: {result}")
+            
+            processed_result = self._process_tool_result(result)
+            
+            logger.info(f"=== MCP PROCESSED RESULT ===")
+            logger.info(f"Processed Result: {processed_result}")
+            logger.info(f"=== MCP TOOL EXECUTION END ===")
+            
+            return processed_result
         except Exception as e:
+            logger.error(f"=== MCP TOOL EXECUTION FAILED ===")
+            logger.error(f"Server: {server_name}")
+            logger.error(f"Tool: {tool_name}")
+            logger.error(f"Error: {e}")
+            logger.error(f"=== MCP ERROR END ===")
             logger.error(f"Tool execution failed for '{tool_id}': {e}", exc_info=True)
             raise RuntimeError(f"Tool execution failed: {e}")
 
@@ -313,28 +343,46 @@ class MCPClientManager:
                 logger.info(f"Server '{server_name}' is disabled or has invalid configuration.")
 
     async def shutdown(self) -> None:
-        """全てのMCPセッションをシャットダウン"""
+        """全てのMCPセッションをシャットダウン（公式パターン対応）"""
         logger.info("Shutting down all MCP client sessions...")
         
-        # セッションを閉じる
-        for server_name, session in list(self.sessions.items()):
+        # 公式パターン: AsyncExitStack を閉じる
+        for server_name, exit_stack in list(self.exit_stacks.items()):
             try:
-                await session.close()
-                logger.info(f"Session for server '{server_name}' closed successfully.")
-            except Exception as e:
-                logger.error(f"Error closing session for server '{server_name}': {e}", exc_info=True)
+                # AsyncExitStack の aclose でリソース全体をクリーンアップ
+                await asyncio.wait_for(exit_stack.aclose(), timeout=10.0)
+                logger.info(f"Resources for server '{server_name}' closed successfully.")
+            except asyncio.TimeoutError:
+                logger.warning(f"Timeout closing resources for server '{server_name}'")
+            except (Exception, BaseExceptionGroup) as e:
+                # TaskGroupエラーを含む全ての例外を捕捉
+                if "TaskGroup" in str(type(e)) or "unhandled errors" in str(e):
+                    logger.warning(f"TaskGroup cleanup error for server '{server_name}' (safely ignored)")
+                else:
+                    logger.error(f"Error closing resources for server '{server_name}': {e}")
             finally:
-                del self.sessions[server_name]
+                # 参照を削除
+                if server_name in self.exit_stacks:
+                    del self.exit_stacks[server_name]
+                if server_name in self.sessions:
+                    del self.sessions[server_name]
 
-        # stdio contextsを閉じる
+        # 旧形式のstdio contextsがあれば閉じる（互換性）
         for server_name, stdio_context in list(self.stdio_contexts.items()):
             try:
-                await stdio_context.__aexit__(None, None, None)
-                logger.info(f"Stdio context for server '{server_name}' closed successfully.")
-            except Exception as e:
-                logger.error(f"Error closing stdio context for server '{server_name}': {e}", exc_info=True)
+                await asyncio.wait_for(
+                    stdio_context.__aexit__(None, None, None), 
+                    timeout=5.0
+                )
+                logger.info(f"Legacy stdio context for server '{server_name}' closed.")
+            except (Exception, BaseExceptionGroup) as e:
+                if "TaskGroup" in str(type(e)) or "unhandled errors" in str(e):
+                    logger.warning(f"Legacy TaskGroup cleanup error for server '{server_name}' (safely ignored)")
+                else:
+                    logger.error(f"Error closing legacy stdio context for server '{server_name}': {e}")
             finally:
-                del self.stdio_contexts[server_name]
+                if server_name in self.stdio_contexts:
+                    del self.stdio_contexts[server_name]
 
         self.available_tools.clear()
         self.available_resources.clear()

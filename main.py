@@ -4,6 +4,16 @@ from i18n_setup import init_i18n, _ # 国際化初期化関数と翻訳関数を
 import sys # Pythonのバージョンチェック用
 from tkinter import messagebox # エラー表示用
 import tkinter as tk # TkVersionのため、およびcheck_python_version内のtk.Tk()のため
+import logging # MCPログ表示用
+
+# ロギング設定（MCPの動作を確認するため）
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    handlers=[
+        logging.StreamHandler(sys.stdout),  # コンソールに出力
+    ]
+)
 
 def check_python_version():
     """Pythonのバージョンが3.7以上であることを確認する"""
