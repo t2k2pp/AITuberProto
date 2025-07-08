@@ -3,6 +3,7 @@ import tkinter as tk # 基本的な型 (StringVarなど) と標準ダイアロ�
 from tkinter import ttk, messagebox, filedialog, simpledialog # Treeviewと標準ダイアログはそのまま使用
 import csv
 import os
+import re
 import sys # フォント選択のため
 from pathlib import Path
 import asyncio
@@ -49,6 +50,15 @@ class AITheaterWindow:
         self.character_manager = CharacterManager(self.config_manager)
         self.voice_manager = VoiceEngineManager()
         self.audio_player = AudioPlayer(config_manager=self.config_manager)
+
+        # --- カナ変換の準備 ---
+        try:
+            self.kks = kakasi()
+        except Exception as e:
+            self.kks = None
+            self.log(f"Failed to initialize kakasi: {e}")
+            messagebox.showerror("Error", f"Failed to initialize kana converter (kakasi): {e}")
+        # ---
 
         self.current_script_path = None
         self.script_data = []
@@ -982,21 +992,40 @@ class AITheaterWindow:
             line_num = int(self.script_tree.item(item_id, 'values')[0])
             self._update_line_status_in_tree(line_num, status_not_generated) # status is already translated
 
+    def _convert_text_intelligently(self, text, target_mode):
+        """
+        テキストを単語単位で解析し、漢字を含む単語のみを選択的に変換する。
+        pykakakiの形態素解析を利用して、送り仮名を正しく扱います。
+        """
+        if not self.kks:
+            self.log("kakasi not initialized, skipping conversion.")
+            return text
+
+        target_key = "hira" if target_mode == self._("ai_theater.dropdown.hiragana") else "kana"
+        
+        result = self.kks.convert(text)
+        
+        converted_parts = []
+        for item in result:
+            # 元の単語(item['orig'])に漢字が含まれているかチェック
+            if re.search(r'[一-龯]', item['orig']):
+                # 漢字が含まれていれば、指定モード（ひらがな or カタカナ）に変換した結果を使う
+                converted_parts.append(item[target_key])
+            else:
+                # 漢字が含まれていなければ、元の単語をそのまま使う
+                converted_parts.append(item['orig'])
+        
+        return "".join(converted_parts)
+
     def _convert_script_data_to_kana(self, script_data):
-        """CSVデータ内の'words'をカナに変換する。"""
+        """CSVデータ内の'words'を、インテリジェントなカナ変換ロジックを使って変換する。"""
         mode = self.kana_mode_var.get()
         self.log(self._("ai_theater.log.kana_conversion_started").format(mode=mode))
         try:
-            kks = kakasi()
-            target_key = "hira" if mode == self._("ai_theater.dropdown.hiragana") else "kana"
-            
             converted_data = []
             for row in script_data:
-                # talkまたはnarrationアクションで、wordsに内容がある場合のみ変換
                 if row.get('action') in ['talk', 'narration'] and row.get('words'):
-                    result = kks.convert(row['words'])
-                    converted_text = "".join([item[target_key] for item in result])
-                    row['words'] = converted_text
+                    row['words'] = self._convert_text_intelligently(row['words'], mode)
                 converted_data.append(row)
             self.log(self._("ai_theater.log.kana_conversion_success"))
             return converted_data
@@ -1006,19 +1035,15 @@ class AITheaterWindow:
             return script_data # Return original data on error
 
     def _convert_lines_to_kana(self, lines):
-        """テキスト行のリストをカナに変換する。"""
+        """テキスト行のリストを、インテリジェントなカナ変換ロジックを使って変換する。"""
         mode = self.kana_mode_var.get()
         self.log(self._("ai_theater.log.kana_conversion_started").format(mode=mode))
         try:
-            kks = kakasi()
-            target_key = "hira" if mode == self._("ai_theater.dropdown.hiragana") else "kana"
-
             converted_lines = []
             for line in lines:
                 line_stripped = line.strip()
                 if line_stripped:
-                    result = kks.convert(line_stripped)
-                    converted_text = "".join([item[target_key] for item in result])
+                    converted_text = self._convert_text_intelligently(line_stripped, mode)
                     converted_lines.append(converted_text + '\n') # Add newline back
                 else:
                     converted_lines.append(line) # Keep empty/whitespace-only lines
