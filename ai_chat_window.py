@@ -59,6 +59,7 @@ class AIChatWindow:
             # messagebox.showerror(self._("ai_chat.messagebox.folder_creation_error.title"), self._("ai_chat.error.history_folder_creation_failed", e=e), parent=self.root)
 
         self.current_ai_chat_file_path = None
+        self.shutdown_completed = False  # シャットダウン完了フラグ
 
         # フォント設定
         self.default_font = ("Yu Gothic UI", 12)
@@ -107,17 +108,89 @@ class AIChatWindow:
 
     def on_closing(self):
         self.log(self._("ai_chat.log.shutting_down_mcp"))
+        
+        # 終了処理中を示すダイアログを表示
+        self._show_shutdown_dialog()
+        
+        # MCPクライアントのシャットダウンを別スレッドで実行（タイムアウト付き）
+        shutdown_thread = threading.Thread(target=self._shutdown_mcp_with_timeout, daemon=True)
+        shutdown_thread.start()
+        
+        # 最大5秒待機してからウィンドウを閉じる
+        self.root.after(5000, self._force_close_window)
+        
+        # 短時間でシャットダウンが完了した場合の処理
+        self._check_shutdown_completion()
+    
+    def _show_shutdown_dialog(self):
+        """シャットダウン処理中を示すダイアログを表示"""
         try:
-            # MCPクライアントのシャットダウン (非同期)
+            # 既存のウィジェットを無効化
+            for widget in self.root.winfo_children():
+                try:
+                    widget.configure(state='disabled')
+                except:
+                    pass  # 無効化できないウィジェットはスキップ
+            
+            # シャットダウン中のラベルを表示
+            self.shutdown_label = customtkinter.CTkLabel(
+                self.root, 
+                text=self._("ai_chat.message.shutting_down"),
+                font=("Yu Gothic UI", 16),
+                text_color=("gray10", "gray90")
+            )
+            self.shutdown_label.place(relx=0.5, rely=0.5, anchor="center")
+            
+            # 背景を半透明に
+            self.shutdown_overlay = customtkinter.CTkFrame(self.root, fg_color=("gray80", "gray20"))
+            self.shutdown_overlay.place(x=0, y=0, relwidth=1, relheight=1)
+            self.shutdown_overlay.lower()
+            
+            self.root.update_idletasks()
+        except Exception as e:
+            self.log(f"Error showing shutdown dialog: {e}")
+    
+    def _shutdown_mcp_with_timeout(self):
+        """MCPクライアントのシャットダウンをタイムアウト付きで実行"""
+        try:
+            # 新しいイベントループでシャットダウンを実行
             loop = asyncio.new_event_loop()
             asyncio.set_event_loop(loop)
-            loop.run_until_complete(self.mcp_client_manager.shutdown())
-            loop.close()
-            self.log(self._("ai_chat.log.mcp_shutdown_complete"))
+            
+            # タイムアウト付きでシャットダウンを実行
+            shutdown_task = loop.create_task(self.mcp_client_manager.shutdown())
+            try:
+                loop.run_until_complete(asyncio.wait_for(shutdown_task, timeout=3.0))
+                self.log(self._("ai_chat.log.mcp_shutdown_complete"))
+                self.shutdown_completed = True
+            except asyncio.TimeoutError:
+                self.log(self._("ai_chat.log.mcp_shutdown_timeout"))
+                self.shutdown_completed = True  # タイムアウトでも終了を許可
+            finally:
+                loop.close()
+                
         except Exception as e:
             self.log(self._("ai_chat.log.mcp_shutdown_error", error=e))
-        finally:
+            self.shutdown_completed = True  # エラーでも終了を許可
+    
+    def _check_shutdown_completion(self):
+        """シャットダウン完了をチェックし、完了していれば即座に終了"""
+        if hasattr(self, 'shutdown_completed') and self.shutdown_completed:
+            self._force_close_window()
+        else:
+            # 100ms後に再チェック
+            self.root.after(100, self._check_shutdown_completion)
+    
+    def _force_close_window(self):
+        """強制的にウィンドウを閉じる"""
+        try:
+            self.log(self._("ai_chat.log.window_closing"))
             self.root.destroy()
+        except Exception as e:
+            self.log(f"Error during force close: {e}")
+            # 最後の手段として強制終了
+            import os
+            os._exit(0)
 
     def create_widgets(self):
         # ttk.PanedWindow の代替として、2つのCTkFrameを配置し、中間に手動でリサイズ機能を追加するか、

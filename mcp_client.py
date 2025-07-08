@@ -346,14 +346,18 @@ class MCPClientManager:
         """全てのMCPセッションをシャットダウン（公式パターン対応）"""
         logger.info("Shutting down all MCP client sessions...")
         
+        # 短縮されたタイムアウト（UI応答性向上のため）
+        exit_stack_timeout = 3.0
+        legacy_timeout = 2.0
+        
         # 公式パターン: AsyncExitStack を閉じる
         for server_name, exit_stack in list(self.exit_stacks.items()):
             try:
                 # AsyncExitStack の aclose でリソース全体をクリーンアップ
-                await asyncio.wait_for(exit_stack.aclose(), timeout=10.0)
+                await asyncio.wait_for(exit_stack.aclose(), timeout=exit_stack_timeout)
                 logger.info(f"Resources for server '{server_name}' closed successfully.")
             except asyncio.TimeoutError:
-                logger.warning(f"Timeout closing resources for server '{server_name}'")
+                logger.warning(f"Timeout closing resources for server '{server_name}' (timeout: {exit_stack_timeout}s)")
             except (Exception, BaseExceptionGroup) as e:
                 # TaskGroupエラーを含む全ての例外を捕捉
                 if "TaskGroup" in str(type(e)) or "unhandled errors" in str(e):
@@ -372,9 +376,11 @@ class MCPClientManager:
             try:
                 await asyncio.wait_for(
                     stdio_context.__aexit__(None, None, None), 
-                    timeout=5.0
+                    timeout=legacy_timeout
                 )
                 logger.info(f"Legacy stdio context for server '{server_name}' closed.")
+            except asyncio.TimeoutError:
+                logger.warning(f"Timeout closing legacy stdio context for server '{server_name}' (timeout: {legacy_timeout}s)")
             except (Exception, BaseExceptionGroup) as e:
                 if "TaskGroup" in str(type(e)) or "unhandled errors" in str(e):
                     logger.warning(f"Legacy TaskGroup cleanup error for server '{server_name}' (safely ignored)")
